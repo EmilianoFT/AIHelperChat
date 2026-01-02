@@ -19,6 +19,27 @@ AI Helper Chat es un complemento **gratuito y de código abierto** para Eclipse 
 3. Abre la vista `Window > Show View > Other... > AI Helper Chat`.
 4. Define tus variables de entorno (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`) antes de lanzar Eclipse. Ollama funciona sin API key si el daemon local responde.
 
+## Estructura del workspace PDE
+El repositorio ya incluye los tres proyectos que exige Eclipse Marketplace para distribuir un bundle completo:
+- `com.aihelper`: proyecto plug-in (bundle OSGi) con el código Java y los manifiestos (`plugin.xml`, `MANIFEST.MF`, `build.properties`).
+- `com.aihelper.feature`: proyecto Feature independiente que empaqueta el plug-in como artefacto instalable (`feature.xml`, `build.properties`).
+- `com.aihelper.updatesite`: proyecto Update Site que publica el Feature dentro de un repositorio p2 (`site.xml`).
+
+Puedes importar los tres proyectos con `File > Import > Existing Projects into Workspace` apuntando a la carpeta raíz del repositorio; Eclipse detectará automáticamente la naturaleza PDE correcta (Plugin, Feature y Update Site) gracias a los archivos `.project` incluidos.
+
+```
+Workspace/
+├─ com.aihelper                (plugin)
+├─ com.aihelper.feature        (feature)
+└─ com.aihelper.updatesite     (update site)
+```
+
+## Publicación en Eclipse Marketplace
+1. **Construye el Feature**: desde el proyecto `com.aihelper.feature` ejecuta `Export > Deployable features` y genera el `.jar` del feature.
+2. **Genera el update site**: abre el proyecto `com.aihelper.updatesite`, edita `site.xml` para verificar la URL del feature y usa `Export > Deployable features` o `Build All` dentro del editor para producir el repositorio p2 (`features/` + `plugins/`).
+3. **Verifica localmente**: apunta un Eclipse limpio a la carpeta del update site con `Help > Install New Software... > Add... > Local...` para confirmar que la instalación funciona.
+4. **Publica en Marketplace**: sube el contenido del update site generado (incluido `site.xml`) al hosting que prefieras y referencia esa URL en el formulario de Marketplace.
+
 ## Configuración de proveedores
 Cada proveedor se inicializa leyendo su variable de entorno correspondiente. Si no está definida, la vista mostrará un recordatorio al seleccionarlo. De forma avanzada puedes editar el archivo `.metadata/.plugins/org.eclipse.core.runtime/.settings/com.aihelper.prefs` del workspace runtime para fijar modelos/base URLs personalizados.
 

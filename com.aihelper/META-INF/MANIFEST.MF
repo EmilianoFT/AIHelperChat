@@ -1,9 +1,9 @@
 Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
-Bundle-Name: AI Helper Chat for Eclipse
+Bundle-Name:  AI Helper Chat for Eclipse
 Bundle-SymbolicName: com.aihelper;singleton:=true
 Bundle-Version: 1.0.0
-Bundle-Activator: com.aihelper.Activator
+Automatic-Module-Name: com.aihelper.Activator
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Require-Bundle: 
  org.eclipse.ui,
@@ -14,3 +14,4 @@ Require-Bundle:
  org.eclipse.swt,
  org.eclipse.ui.workbench.texteditor,
  org.eclipse.text
+
