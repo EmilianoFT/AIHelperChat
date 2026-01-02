@@ -5,8 +5,8 @@ AI Helper Chat es un complemento **gratuito y de código abierto** para Eclipse 
 ## Características clave
 - Compatibilidad con Ollama, OpenAI, Gemini, Qwen y DeepSeek.
 - Vista de chat con streaming, historial reciente y render de Markdown/código.
-- Lectura opcional de archivos/proyectos vía acciones `[ACTION:READ_*]` dentro de la respuesta.
-- Lectura de credenciales desde variables de entorno (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`) con fallback opcional al `IPreferenceStore` del workspace.
+- Lectura opcional de archivos/proyectos vía acciones `[ACTION:READ_*]` dentro de la respuesta *(en desarrollo, aún no disponible en esta versión).* 
+- Lectura y almacenamiento de credenciales mediante el panel de configuración del plugin, que persiste los valores en las preferencias del workspace.
 
 ## Requisitos
 - Eclipse 2023-12 o superior con SWT.
@@ -17,7 +17,6 @@ AI Helper Chat es un complemento **gratuito y de código abierto** para Eclipse 
 1. Clona el repositorio y abre la carpeta `AI Helper Chat` como proyecto Eclipse PDE.
 2. Ejecuta `Run > Eclipse Application` para cargar un runtime workspace con el plugin.
 3. Abre la vista `Window > Show View > Other... > AI Helper Chat`.
-4. Define tus variables de entorno (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`) antes de lanzar Eclipse. Ollama funciona sin API key si el daemon local responde.
 
 ## Estructura del workspace PDE
 El repositorio ya incluye los tres proyectos que exige Eclipse Marketplace para distribuir un bundle completo:
