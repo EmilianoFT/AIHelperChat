@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+
+<plugin>
+
+   <extension
+         point="org.eclipse.ui.views">
+      <view
+            id="com.aihelper.ui.chatView"
+            name="AI Helper Chat"
+            class="com.aihelper.ui.ChatView"
+            category="com.aihelper">
+      </view>
+   </extension>
+
+   <extension
+         point="org.eclipse.core.runtime.preferences">
+      <initializer
+            class="com.aihelper.preferences.PreferenceInitializer">
+      </initializer>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.preferencePages">
+      <page
+            id="com.aihelper.preferences"
+            name="AI Helper Chat"
+            class="com.aihelper.preferences.CredentialsPreferencePage">
+      </page>
+   </extension>
+
+</plugin>

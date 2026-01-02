@@ -1,0 +1,10 @@
+<feature
+    id="com.aihelper.feature"
+    label="AI Helper"
+    version="1.0.0">
+
+    <plugin 
+      id="com.aihelper"
+      version="0.0.0"
+      unpack="false"/>
+</feature>
