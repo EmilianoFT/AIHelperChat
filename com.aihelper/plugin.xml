@@ -9,7 +9,8 @@
             id="com.aihelper.ui.chatView"
             name="AI Helper Chat"
             class="com.aihelper.ui.ChatView"
-            category="com.aihelper">
+            category="com.aihelper"
+            icon="icons/aihelper-icon.png">
       </view>
    </extension>
 
