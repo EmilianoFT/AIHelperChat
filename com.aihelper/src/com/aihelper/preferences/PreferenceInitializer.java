@@ -38,5 +38,9 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 
         store.setDefault(PreferenceConstants.OLLAMA_BASE_URL, "http://localhost:11434");
 
+        store.setDefault(PreferenceConstants.CHAT_MAX_HISTORY, 50);
+        store.setDefault(PreferenceConstants.LIST_MAX_DEPTH, 5);
+        store.setDefault(PreferenceConstants.LIST_MAX_LIMIT, 500);
+
     }
 }

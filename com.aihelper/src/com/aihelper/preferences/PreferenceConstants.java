@@ -24,4 +24,8 @@ public final class PreferenceConstants {
 
     public static final String OLLAMA_BASE_URL = "ollama.base.url";
 
+    public static final String CHAT_MAX_HISTORY = "chat.max.history";
+    public static final String LIST_MAX_DEPTH = "chat.list.max.depth";
+    public static final String LIST_MAX_LIMIT = "chat.list.max.limit";
+
 }

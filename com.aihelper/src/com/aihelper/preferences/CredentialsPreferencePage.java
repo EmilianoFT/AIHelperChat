@@ -1,6 +1,7 @@
 package com.aihelper.preferences;
 
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
+import org.eclipse.jface.preference.IntegerFieldEditor;
 import org.eclipse.jface.preference.StringFieldEditor;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
@@ -81,5 +82,26 @@ public class CredentialsPreferencePage extends FieldEditorPreferencePage impleme
                 PreferenceConstants.OLLAMA_BASE_URL,
                 "Ollama base URL",
                 getFieldEditorParent()));
+
+        IntegerFieldEditor history = new IntegerFieldEditor(
+                PreferenceConstants.CHAT_MAX_HISTORY,
+                "Mensajes máx. en historial (contexto)",
+                getFieldEditorParent());
+        history.setValidRange(1, 500);
+        addField(history);
+
+        IntegerFieldEditor depth = new IntegerFieldEditor(
+                PreferenceConstants.LIST_MAX_DEPTH,
+                "Profundidad máxima LIST_FILES",
+                getFieldEditorParent());
+        depth.setValidRange(1, 10);
+        addField(depth);
+
+        IntegerFieldEditor limit = new IntegerFieldEditor(
+                PreferenceConstants.LIST_MAX_LIMIT,
+                "Límite máximo de archivos LIST_FILES",
+                getFieldEditorParent());
+        limit.setValidRange(10, 1000);
+        addField(limit);
     }
 }

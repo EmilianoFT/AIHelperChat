@@ -21,7 +21,7 @@ public class OllamaChatService implements AiChatService {
     private final HttpClient client = HttpClient.newHttpClient();
 
     @Override
-    public void sendMessageStreaming(
+    public Runnable sendMessageStreaming(
             String prompt,
             String context,
             Consumer<String> onChunk,
@@ -48,7 +48,7 @@ public class OllamaChatService implements AiChatService {
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
 
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
+            var future = client.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
                     .thenAccept(response -> {
                         if (response.statusCode() >= 400) {
                             String errorBody = safeCollect(response.body());
@@ -76,9 +76,12 @@ public class OllamaChatService implements AiChatService {
                         onComplete.run();
                     });
 
+            return () -> future.cancel(true);
+
         } catch (Exception e) {
             onError.accept(e);
             onComplete.run();
+            return () -> {};
         }
     }
 

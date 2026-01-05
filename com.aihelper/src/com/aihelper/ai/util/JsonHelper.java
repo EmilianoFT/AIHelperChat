@@ -43,5 +43,28 @@ public final class JsonHelper {
         }
         return values;
     }
+
+    /**
+     * Extracts all string values for a given key using a simple regex, tolerant to nested objects.
+     */
+    public static List<String> extractAllValues(String json, String key) {
+        List<String> values = new ArrayList<>();
+        if (json == null || key == null || key.isEmpty()) return values;
+        String pattern = "\\\"" + key + "\\\"\\s*:\\s*\\\"(.*?)\\\"";
+        var matcher = java.util.regex.Pattern.compile(pattern).matcher(json);
+        while (matcher.find()) {
+            values.add(unescapeBasic(matcher.group(1)));
+        }
+        return values;
+    }
+
+    private static String unescapeBasic(String text) {
+        if (text == null) return null;
+        return text
+            .replace("\\\\", "\\")
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t");
+    }
 }
 

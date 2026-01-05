@@ -36,7 +36,7 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
     protected String completionsPath() { return "/chat/completions"; }
 
     @Override
-    public void sendMessageStreaming(
+    public Runnable sendMessageStreaming(
             String prompt,
             String context,
             Consumer<String> onChunk,
@@ -47,21 +47,21 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
         if (key == null) {
             onError.accept(new IllegalStateException("Configura la API Key de " + providerName()));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
         String endpoint = buildChatEndpoint();
         if (endpoint == null) {
             onError.accept(new IllegalStateException("Configura la base URL de " + providerName()));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
         String chatModel = effectiveModel();
         if (chatModel == null) {
             onError.accept(new IllegalStateException("Configura el modelo por defecto de " + providerName()));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
                 try {
@@ -87,7 +87,7 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
                                         .POST(HttpRequest.BodyPublishers.ofString(payload))
                                         .build();
 
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
+            var future = client.sendAsync(request, HttpResponse.BodyHandlers.ofLines())
                     .thenAccept(response -> {
                         if (response.statusCode() >= 400) {
                             String errorBody = safeCollect(response.body());
@@ -99,10 +99,13 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
 
                         try (Stream<String> lines = response.body()) {
                             lines.forEach(line -> {
-                                if (line.startsWith("data: ") && !line.contains("[DONE]")) {
-                                    String content = JsonHelper.extractJsonValue(line, "content");
-                                    if (content != null) {
-                                        onChunk.accept(content);
+                                if (!line.startsWith("data: ") || line.contains("[DONE]")) {
+                                    return;
+                                }
+                                List<String> contents = JsonHelper.extractAllValues(line, "content");
+                                for (String c : contents) {
+                                    if (c != null && !c.isEmpty()) {
+                                        onChunk.accept(c);
                                     }
                                 }
                             });
@@ -115,9 +118,12 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
                         onComplete.run();
                     });
 
+            return () -> future.cancel(true);
+
         } catch (Exception e) {
             onError.accept(e);
             onComplete.run();
+            return () -> {};
         }
     }
 

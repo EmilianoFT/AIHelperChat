@@ -20,7 +20,7 @@ public class GeminiChatService implements AiChatService {
     private String userModel;
 
     @Override
-    public void sendMessageStreaming(
+    public Runnable sendMessageStreaming(
             String prompt,
             String context,
             Consumer<String> onChunk,
@@ -31,21 +31,21 @@ public class GeminiChatService implements AiChatService {
         if (apiKey == null) {
             onError.accept(new IllegalStateException("Configura la API Key de Gemini"));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
         String base = trimToNull(CredentialsService.getGeminiBaseUrl());
         if (base == null) {
             onError.accept(new IllegalStateException("Configura la base URL de Gemini"));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
         String chatModel = effectiveModel();
         if (chatModel == null) {
             onError.accept(new IllegalStateException("Configura el modelo por defecto de Gemini"));
             onComplete.run();
-            return;
+            return () -> {};
         }
 
         try {
@@ -74,7 +74,7 @@ public class GeminiChatService implements AiChatService {
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
 
-            client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                var future = client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .thenAccept(response -> {
                         if (response.statusCode() >= 400) {
                             onError.accept(new IllegalStateException(
@@ -94,9 +94,12 @@ public class GeminiChatService implements AiChatService {
                         onComplete.run();
                     });
 
+            return () -> future.cancel(true);
+
         } catch (Exception e) {
             onError.accept(e);
             onComplete.run();
+            return () -> {};
         }
     }
 
