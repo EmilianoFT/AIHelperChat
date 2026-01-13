@@ -8,131 +8,138 @@ import java.util.regex.Pattern;
 
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.PreferenceDialog;
-import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.dnd.Clipboard;
+import org.eclipse.swt.dnd.TextTransfer;
+import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Font;
+import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.ImageData;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Text;
-import org.eclipse.swt.dnd.Clipboard;
-import org.eclipse.swt.dnd.TextTransfer;
-import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.ui.dialogs.PreferencesUtil;
 import org.eclipse.ui.part.ViewPart;
 
-import com.aihelper.ai.AiChatService;
-import com.aihelper.ai.DeepSeekChatService;
-import com.aihelper.ai.GeminiChatService;
-import com.aihelper.ai.OllamaChatService;
-import com.aihelper.ai.OpenAiChatService;
-import com.aihelper.ai.QwenChatService;
+import com.aihelper.ai.*;
 import com.aihelper.model.ChatMessage;
-import com.aihelper.preferences.CredentialsService;
-import com.aihelper.preferences.PreferenceConstants;
-import com.aihelper.ui.ApplyChangesDialog;
-import com.aihelper.ui.chat.ChatActionDispatcher;
-import com.aihelper.ui.chat.ChatContextBuilder;
-import com.aihelper.ui.chat.CodeFenceHelper;
-import com.aihelper.ui.chat.ChatHistoryStore;
-import com.aihelper.workspace.WorkspaceService;
+import com.aihelper.ui.chat.*;
 import com.aihelper.workspace.DiffService;
+import com.aihelper.workspace.WorkspaceService;
 
 public class ChatView extends ViewPart {
 
     public static final String ID = "com.aihelper.ui.chatView";
 
+    // ===============================
+    // UI
+    // ===============================
     private StyledText chatArea;
     private Text input;
     private Combo providerCombo;
     private Combo modelCombo;
     private Text statusText;
     private Text progressText;
-    private Button spinnerLabel;
-    private Button sendButton;
-    private Button stopButton;
-    private Button copyCodeButton;
-    private Button applyCodeButton;
+    private Button spinnerButton;
     private Button errorsButton;
-
-    private AiChatService aiService;
     private final WorkspaceService workspaceService = new WorkspaceService();
-    private ChatActionDispatcher actionDispatcher;
-    private ChatContextBuilder contextBuilder;
-    private final ChatHistoryStore historyStore = new ChatHistoryStore();
     private final DiffService diffService = new DiffService();
+    private ChatController controller;
+    private AiChatService aiService;
+    private ChatContextBuilder contextBuilder;
+    private ChatActionDispatcher actionDispatcher;
 
+    // ===============================
+    // State
+    // ===============================
     private final List<ChatMessage> chatHistory = new ArrayList<>();
     private final List<String> errorLog = new ArrayList<>();
+    private Runnable currentCancel;
+    private String lastCodeBlock = "";
+    private int aiMessageStart = -1;
+    private StringBuilder aiResponseBuffer = new StringBuilder();
 
+    // ===============================
+    // Styling
+    // ===============================
     private Font monoFont;
-    private Color codeBackground;
-    private Color codeBorder;
     private Color userBubble;
     private Color aiBubble;
     private Color systemBubble;
-    private Color keywordColor;
-    private Color stringColor;
-    private Color commentColor;
     private Color userTextColor;
     private Color aiTextColor;
     private Color systemTextColor;
+
     private final MarkdownRenderer markdownRenderer = new MarkdownRenderer();
-    private String lastCodeBlock = "";
-    private Runnable currentCancel = null;
-    private int aiMessageStart = -1;
+    private Image copilotIcon;
 
     // ===============================
-    // UI
+    // Lifecycle
     // ===============================
     @Override
     public void createPartControl(Composite parent) {
         parent.setLayout(new GridLayout(1, false));
 
-        Display display = Display.getDefault();
-        monoFont = new Font(display, "Consolas", 10, SWT.NORMAL);
-        codeBackground = display.getSystemColor(SWT.COLOR_WIDGET_LIGHT_SHADOW);
-        codeBorder = display.getSystemColor(SWT.COLOR_GRAY);
-        userBubble = display.getSystemColor(SWT.COLOR_INFO_BACKGROUND);
-        aiBubble = display.getSystemColor(SWT.COLOR_TITLE_INACTIVE_BACKGROUND_GRADIENT);
-        systemBubble = display.getSystemColor(SWT.COLOR_GRAY);
-        keywordColor = display.getSystemColor(SWT.COLOR_DARK_BLUE);
-        stringColor = display.getSystemColor(SWT.COLOR_DARK_GREEN);
-        commentColor = display.getSystemColor(SWT.COLOR_DARK_GRAY);
-        userTextColor = display.getSystemColor(SWT.COLOR_BLACK);
-        aiTextColor = display.getSystemColor(SWT.COLOR_DARK_BLUE);
-        systemTextColor = display.getSystemColor(SWT.COLOR_WHITE);
-
+        initColors();
         createToolbar(parent);
         createChatArea(parent);
-        createInput(parent);
+        createInputBar(parent);
         createStatusBar(parent);
 
-        loadHistory();
+        // Set logo in the tab (opcional, no en la vista)
+        try {
+            Image logo = new Image(parent.getDisplay(), getClass().getResourceAsStream("/icons/aihelper-icon.png"));
+            setTitleImage(logo);
+        } catch (Exception e) {
+            // Ignore if logo not found
+        }
 
         contextBuilder = new ChatContextBuilder(workspaceService);
-        actionDispatcher = new ChatActionDispatcher(workspaceService, this::sendAutomated);
+        // Instanciar el dispatcher para acciones automáticas
+        actionDispatcher = new ChatActionDispatcher(workspaceService, this::appendAutomatedUser);
+
+        loadHistory();
         initProvider();
     }
 
+    // ===============================
+    // TOOLBAR
+    // ===============================
     private void createToolbar(Composite parent) {
         Composite bar = new Composite(parent, SWT.NONE);
-        bar.setLayout(new GridLayout(8, false));
         bar.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        bar.setLayout(new GridLayout(9, false));
+
+        // Logo pequeño a la izquierda, imagen realmente 24x24
+        Label logoLabel = new Label(bar, SWT.NONE);
+        GridData logoData = new GridData(SWT.BEGINNING, SWT.CENTER, false, false);
+        logoLabel.setLayoutData(logoData);
+        try {
+            ImageData imgData = new ImageData(getClass().getResourceAsStream("/icons/aihelper-icon.png"));
+            Image logoImg = new Image(bar.getDisplay(), imgData.scaledTo(24, 24));
+            logoLabel.setImage(logoImg);
+        } catch (Exception e) {
+            // Ignore if logo not found
+        }
 
         providerCombo = new Combo(bar, SWT.READ_ONLY);
+        providerCombo.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         providerCombo.setItems("Ollama", "OpenAI", "Gemini", "Qwen", "DeepSeek");
         providerCombo.select(0);
+        providerCombo.setToolTipText("Selecciona el proveedor de IA");
         providerCombo.addListener(SWT.Selection, e -> switchProvider());
 
         modelCombo = new Combo(bar, SWT.READ_ONLY);
         modelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        modelCombo.setToolTipText("Selecciona el modelo de IA");
         modelCombo.addListener(SWT.Selection, e -> {
             aiService.setModel(modelCombo.getText());
             statusInfo("Modelo activo: " + modelCombo.getText());
@@ -140,505 +147,489 @@ public class ChatView extends ViewPart {
 
         Button clear = new Button(bar, SWT.PUSH);
         clear.setText("Clear");
+        clear.setToolTipText("Limpiar chat");
+        clear.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         clear.addListener(SWT.Selection, e -> {
             chatArea.setText("");
             chatHistory.clear();
             statusInfo("Historial limpiado");
         });
 
-        Button preferencesButton = new Button(bar, SWT.PUSH);
-        preferencesButton.setText("\u2699");
-        preferencesButton.setToolTipText("Configurar credenciales y endpoints");
-        preferencesButton.addListener(SWT.Selection, e -> openPreferences());
+        Button prefs = new Button(bar, SWT.PUSH);
+        prefs.setText("⚙");
+        prefs.setToolTipText("Configurar credenciales y endpoints");
+        prefs.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        prefs.addListener(SWT.Selection, e -> openPreferences());
 
-        stopButton = new Button(bar, SWT.PUSH);
+        Button stopButton = new Button(bar, SWT.PUSH);
         stopButton.setText("Stop");
+        stopButton.setToolTipText("Cancelar respuesta actual");
         stopButton.setEnabled(false);
+        stopButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         stopButton.addListener(SWT.Selection, e -> cancelStreaming());
 
-        copyCodeButton = new Button(bar, SWT.PUSH);
+        Button copyCodeButton = new Button(bar, SWT.PUSH);
         copyCodeButton.setText("Copy code");
+        copyCodeButton.setToolTipText("Copiar último bloque de código");
+        copyCodeButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         copyCodeButton.addListener(SWT.Selection, e -> copyLastCodeBlock());
 
-        applyCodeButton = new Button(bar, SWT.PUSH);
+        Button applyCodeButton = new Button(bar, SWT.PUSH);
         applyCodeButton.setText("Apply code");
+        applyCodeButton.setToolTipText("Aplicar último bloque de código al editor activo");
+        applyCodeButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         applyCodeButton.addListener(SWT.Selection, e -> applyLastCodeBlock());
-
     }
 
-    private void createChatArea(Composite parent) {
-        chatArea = new StyledText(parent, SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.H_SCROLL);
-        chatArea.setEditable(false);
-        chatArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-    }
-
-    private void createInput(Composite parent) {
-    	Composite inputBar = new Composite(parent, SWT.NONE);
-        inputBar.setLayout(new GridLayout(2, false));
-        inputBar.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-
-        input = new Text(
-            inputBar,
-            SWT.BORDER | SWT.MULTI | SWT.WRAP | SWT.V_SCROLL
+    public void openPreferences() {
+        PreferenceDialog dialog = PreferencesUtil.createPreferenceDialogOn(
+            getSite().getShell(),
+            "com.aihelper.preferences.main",
+            null,
+            null
         );
-
-        GridData inputData = new GridData(SWT.FILL, SWT.CENTER, true, false);
-
-        int lineHeight = input.getLineHeight();
-        inputData.heightHint = lineHeight * 5 + 6;
-
-        input.setLayoutData(inputData);
-
-        input.addListener(SWT.KeyDown, e -> {
-            if (e.keyCode == SWT.CR || e.keyCode == SWT.LF) {
-                if ((e.stateMask & SWT.CTRL) != 0) {
-                    e.doit = false;
-                        send();
-                }
-            }
-        });
-
-        sendButton = new Button(inputBar, SWT.PUSH);
-        sendButton.setText("Send");
-        sendButton.setLayoutData(new GridData(SWT.RIGHT, SWT.BOTTOM, false, false));
-        sendButton.addListener(SWT.Selection, e -> send());
-    }
-
-    private void createStatusBar(Composite parent) {
-        Composite bar = new Composite(parent, SWT.NONE);
-        bar.setLayout(new GridLayout(4, false));
-        bar.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
-
-        statusText = new Text(bar, SWT.BORDER | SWT.READ_ONLY);
-        statusText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        statusText.setText("[INFO] Listo");
-
-        progressText = new Text(bar, SWT.BORDER | SWT.READ_ONLY);
-        GridData gd = new GridData(SWT.RIGHT, SWT.CENTER, false, false);
-        gd.widthHint = 120;
-        progressText.setLayoutData(gd);
-        progressText.setText("0/0");
-
-        spinnerLabel = new Button(bar, SWT.PUSH);
-        spinnerLabel.setText("⟳");
-        spinnerLabel.setEnabled(false);
-        spinnerLabel.setToolTipText("Estado de streaming");
-
-        errorsButton = new Button(bar, SWT.PUSH);
-        errorsButton.setText("Errores 0");
-        errorsButton.setToolTipText("Ver registro de errores recientes");
-        errorsButton.addListener(SWT.Selection, e -> showErrorLog());
-    }
-
-    private void loadHistory() {
-        int limit = resolveHistoryLimit();
-        List<ChatMessage> saved = historyStore.load(resolveHistoryProject(), limit);
-        if (saved.isEmpty()) return;
-
-        for (ChatMessage msg : saved) {
-            if (msg == null) continue;
-            chatHistory.add(msg);
-            String role = msg.getRole() == null ? "" : msg.getRole().toLowerCase();
-            String content = msg.getContent() == null ? "" : msg.getContent();
-            switch (role) {
-                case "user" -> appendUser(content);
-                case "assistant" -> {
-                    appendAIHeader();
-                    appendFormatted(content);
-                }
-                default -> appendSystem(content);
-            }
+        if (dialog != null) {
+            dialog.open();
         }
     }
 
     // ===============================
-    // PROVIDER / MODELS
+    // CHAT AREA
+    // ===============================
+    private void createChatArea(Composite parent) {
+        chatArea = new StyledText(parent, SWT.BORDER | SWT.V_SCROLL | SWT.H_SCROLL | SWT.WRAP);
+        chatArea.setEditable(false);
+        chatArea.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
+        // Cargar el icono Copilot o AI
+        try {
+            copilotIcon = new Image(parent.getDisplay(), getClass().getResourceAsStream("/icons/aihelper-icon.png"));
+        } catch (Exception e) {
+            copilotIcon = null;
+        }
+    }
+
+    // ===============================
+    // INPUT
+    // ===============================
+    private void createInputBar(Composite parent) {
+        Composite bar = new Composite(parent, SWT.NONE);
+        bar.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
+        bar.setLayout(new GridLayout(2, false));
+
+        input = new Text(bar, SWT.BORDER | SWT.MULTI | SWT.WRAP | SWT.V_SCROLL);
+        GridData gd = new GridData(SWT.FILL, SWT.CENTER, true, false);
+        gd.heightHint = input.getLineHeight() * 4;
+        input.setLayoutData(gd);
+
+        input.setToolTipText("Escribe tu mensaje aquí. Ctrl+Enter para enviar.");
+        input.addListener(SWT.KeyDown, e -> {
+            if ((e.stateMask & SWT.CTRL) != 0 && (e.keyCode == SWT.CR || e.keyCode == SWT.LF)) {
+                send();
+            }
+        });
+
+        Button sendButton = new Button(bar, SWT.PUSH);
+        sendButton.setText("Send");
+        sendButton.setToolTipText("Enviar mensaje");
+        sendButton.addListener(SWT.Selection, e -> send());
+    }
+
+    // ===============================
+    // STATUS BAR
+    // ===============================
+    private void createStatusBar(Composite parent) {
+        Composite bar = new Composite(parent, SWT.NONE);
+        bar.setLayoutData(new GridData(SWT.FILL, SWT.BOTTOM, true, false));
+        bar.setLayout(new GridLayout(4, false));
+
+        statusText = new Text(bar, SWT.READ_ONLY | SWT.BORDER);
+        statusText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        statusText.setText("[INFO] Ready");
+
+        progressText = new Text(bar, SWT.READ_ONLY | SWT.BORDER);
+        progressText.setLayoutData(new GridData(120, SWT.DEFAULT));
+        progressText.setText("Tokens: 0");
+
+        spinnerButton = new Button(bar, SWT.PUSH);
+        spinnerButton.setText("⟳");
+        spinnerButton.setEnabled(false);
+        spinnerButton.setToolTipText("Estado de streaming");
+
+        errorsButton = new Button(bar, SWT.PUSH);
+        errorsButton.setText("Errors 0");
+        errorsButton.setToolTipText("Ver registro de errores recientes");
+        errorsButton.addListener(SWT.Selection, e -> showErrorLog());
+    }
+
+    // ===============================
+    // PROVIDER
     // ===============================
     private void initProvider() {
         switchProvider();
     }
 
     private void switchProvider() {
-        configureProvider(providerCombo.getText(), true);
-    }
-
-    private void configureProvider(String provider, boolean announce) {
-        if (provider == null || provider.isBlank()) {
-            return;
-        }
-
-        try {
-            aiService = newServiceFor(provider);
-            loadModels();
-            if (announce) {
-                appendSystem("Proveedor activo: " + provider);
-            }
-            warnIfMissingCredentials(provider);
-        } catch (Exception e) {
-            statusError("Error inicializando proveedor: " + e.getMessage());
-        }
-    }
-
-    private AiChatService newServiceFor(String provider) {
-        return switch (provider) {
+        aiService = switch (providerCombo.getText()) {
             case "OpenAI" -> new OpenAiChatService();
             case "Gemini" -> new GeminiChatService();
             case "Qwen" -> new QwenChatService();
             case "DeepSeek" -> new DeepSeekChatService();
             default -> new OllamaChatService();
         };
-    }
-
-    private void openPreferences() {
-        PreferenceDialog dialog = PreferencesUtil.createPreferenceDialogOn(
-                getSite().getShell(),
-                PreferenceConstants.PAGE_ID,
-                null,
-                null);
-
-        if (dialog == null) {
-            statusError("No se pudo abrir las preferencias");
-            return;
-        }
-
-        int result = dialog.open();
-        if (result == Window.OK) {
-            configureProvider(providerCombo.getText(), false);
-            statusInfo("Preferencias actualizadas");
-        }
-    }
-
-    private void warnIfMissingCredentials(String provider) {
-        boolean missing = switch (provider) {
-            case "OpenAI" -> !CredentialsService.hasOpenAiKey();
-            case "Gemini" -> !CredentialsService.hasGeminiKey();
-            case "Qwen" -> !CredentialsService.hasQwenKey();
-            case "DeepSeek" -> !CredentialsService.hasDeepSeekKey();
-            default -> false;
-        };
-
-        if (missing) {
-            String envVar = providerEnvVar(provider);
-            statusError("Configura las credenciales de " + provider +
-                (envVar.isEmpty() ? "" : " (" + envVar + ")") +
-                " mediante variables de entorno");
-        }
-    }
-
-    private String providerEnvVar(String provider) {
-        return switch (provider) {
-            case "OpenAI" -> "OPENAI_API_KEY";
-            case "Gemini" -> "GEMINI_API_KEY";
-            case "Qwen" -> "QWEN_API_KEY";
-            case "DeepSeek" -> "DEEPSEEK_API_KEY";
-            default -> "";
-        };
+        loadModels();
     }
 
     private void loadModels() {
-        statusInfo("Cargando modelos...");
-        Display display = Display.getDefault();
-        AiChatService currentService = aiService;
-
         CompletableFuture
-            .supplyAsync(currentService::listModels)
-            .thenAccept(models -> display.asyncExec(() -> {
-                if (aiService != currentService) return;
-                populateModels(models);
-            }))
-            .exceptionally(ex -> {
-                String message = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
-                display.asyncExec(() -> statusError("Error cargando modelos: " + message));
-                return null;
-            });
-    }
-
-    private void populateModels(List<String> models) {
-        if (modelCombo.isDisposed()) return;
-
-        if (models == null || models.isEmpty()) {
-            modelCombo.setItems(new String[0]);
-            statusError("El proveedor no devolvió modelos disponibles");
-            return;
-        }
-
-        modelCombo.setItems(models.toArray(String[]::new));
-        modelCombo.select(0);
-        aiService.setModel(models.get(0));
-        statusInfo("Modelo cargado: " + models.get(0));
+            .supplyAsync(aiService::listModels)
+            .thenAccept(models -> Display.getDefault().asyncExec(() -> {
+                modelCombo.setItems(models.toArray(String[]::new));
+                modelCombo.select(0);
+                aiService.setModel(models.get(0));
+            }));
     }
 
     // ===============================
-    // CHAT
+    // CHAT FLOW
     // ===============================
     private void send() {
-        sendInternal(null, true);
+        sendInternal(null);
     }
 
-    private void sendAutomated(String payload) {
-        sendInternal(payload, false);
-    }
+    private void sendInternal(String override) {
+        String msg = override != null ? override : input.getText().trim();
+        if (msg.isEmpty()) return;
 
-    private void sendInternal(String overrideMessage, boolean echoInChat) {
-        String rawMessage = overrideMessage != null ? overrideMessage : input.getText();
-        if (rawMessage == null) return;
-        String message = rawMessage.trim();
-        if (message.isEmpty()) return;
-
-        if (echoInChat && handleShorthand(message)) {
-            return;
-        }
-
-        clearCancelHandle();
-        startSpinner();
-
-        String providerMessage = requiresAsciiOnly()
-                ? sanitizeForOllama(message).trim()
-                : message;
-
-        if (providerMessage.isEmpty()) {
-            statusError("El mensaje contiene caracteres no soportados para este proveedor");
-            return;
-        }
-
-        if (overrideMessage == null) {
-            input.setText("");
-        }
-
-        if (echoInChat) {
-            appendUser(message);
-        }
-
-        chatHistory.add(new ChatMessage("user", message));
-        trimHistory();
-        persistHistory();
+        input.setText("");
+        appendUser(msg);
+        chatHistory.add(new ChatMessage("user", msg));
 
         appendAIHeader();
-        statusInfo("Armando contexto...");
-
-        String context = contextBuilder.buildContext(chatHistory);
-        if (requiresAsciiOnly()) {
-            context = sanitizeForOllama(context);
-        }
-        context = limitContext(context);
-        int estimatedTokens = (context.length() + providerMessage.length()) / 4;
-        StringBuilder buffer = new StringBuilder();
-        Display display = Display.getDefault();
-        resetProgress();
-
-        statusInfo("Enviando mensaje (~" + estimatedTokens + " tokens)...");
-        stopButton.setEnabled(true);
-        progressInfo(0, estimatedTokens);
-        currentCancel = aiService.sendMessageStreaming(
-            providerMessage,
-            context,
-            chunk -> display.asyncExec(() -> {
-                buffer.append(chunk);
-                statusInfo("Recibiendo...");
-                progressInfo(buffer.length() / 4, estimatedTokens);
+        setStreamingState(true);
+        aiResponseBuffer.setLength(0); // Limpiar buffer de respuesta IA
+        aiService.sendMessageStreaming(
+            msg,
+            contextBuilder.buildContext(chatHistory),
+            chunk -> Display.getDefault().asyncExec(() -> {
+                aiResponseBuffer.append(chunk);
+                updateProgressTokens(chunk != null ? chunk.length() : 0);
             }),
-            err -> display.asyncExec(() -> {
-                appendSystem("ERROR: " + err.getMessage());
-                statusError(err.getMessage());
-                clearCancelHandle();
-                stopSpinner();
-                resetProgress();
+            err -> Display.getDefault().asyncExec(() -> {
+                appendSystem(err.getMessage());
+                errorLog.add(err.getMessage());
+                updateErrorCount();
+                setStreamingState(false);
             }),
-            () -> display.asyncExec(() -> {
-                String text = buffer.toString();
-                actionDispatcher.handle(text);
-                appendFormatted(text);
-                chatHistory.add(new ChatMessage("assistant", text));
-                trimHistory();
-                persistHistory();
-                statusInfo("Respuesta completada");
-                clearCancelHandle();
-                stopSpinner();
-                progressInfo(buffer.length() / 4, estimatedTokens);
+            () -> Display.getDefault().asyncExec(() -> {
+                setStreamingState(false);
+                // Al finalizar, mostrar la respuesta completa de la IA en su globo
+                String aiResponse = aiResponseBuffer.toString();
+                if (!aiResponse.isEmpty()) {
+                    // Si es solo un action, no mostrar en chatArea pero sí agregar al histórico
+                    if (isOnlyAction(aiResponse)) {
+                        chatHistory.add(new ChatMessage("assistant", aiResponse));
+                        actionDispatcher.handle(aiResponse);
+                    } else {
+                        appendAIResponse(aiResponse);
+                        chatHistory.add(new ChatMessage("assistant", aiResponse));
+                        actionDispatcher.handle(aiResponse);
+                    }
+                }
             })
         );
     }
 
     // ===============================
-    // FORMATO TEXTO / CÓDIGO
-    // ===============================
-    private void appendFormatted(String text) {
-        if (text == null || text.isEmpty()) return;
-
-        int start = aiMessageStart >= 0 ? aiMessageStart : chatArea.getCharCount();
-        renderContent(text);
-        chatArea.append("\n\n");
-        scrollToEnd();
-
-        int end = chatArea.getCharCount();
-        applyBubble(start, end - start, aiBubble, aiTextColor);
-        aiMessageStart = -1;
-    }
-
-    private void appendPlain(String txt) {
-        if (!txt.isEmpty()) {
-            markdownRenderer.append(chatArea, txt);
-        }
-    }
-
-    private void renderContent(String text) {
-        String normalized = CodeFenceHelper.normalizeFenceSyntax(text);
-        Matcher m = CodeFenceHelper.codeBlockMatcher(normalized);
-
-        int last = 0;
-        while (m.find()) {
-            appendPlain(normalized.substring(last, m.start()));
-            appendCode(m.group(2));
-            last = m.end();
-        }
-        appendPlain(normalized.substring(last));
-    }
-
-    private void appendCode(String code) {
-        int start = chatArea.getCharCount();
-        String block = ensureTrailingNewline(code);
-        chatArea.append(block);
-
-        StyleRange s = new StyleRange();
-        s.start = start;
-        s.length = block.length();
-        s.font = monoFont;
-        s.background = codeBackground;
-        s.borderStyle = SWT.BORDER;
-        s.borderColor = codeBorder;
-        chatArea.setStyleRange(s);
-        applySyntaxHighlight(block, start);
-        lastCodeBlock = code;
-    }
-
-    private String ensureTrailingNewline(String code) {
-        if (code == null || code.isEmpty()) {
-            return "\n";
-        }
-        return code.endsWith("\n") ? code : code + "\n";
-    }
-
-    private void applySyntaxHighlight(String block, int baseOffset) {
-        applyPattern(block, COMMENT_PATTERN, commentColor, SWT.NORMAL, baseOffset);
-        applyPattern(block, STRING_PATTERN, stringColor, SWT.NORMAL, baseOffset);
-        applyPattern(block, KEYWORD_PATTERN, keywordColor, SWT.BOLD, baseOffset);
-    }
-
-    private void applyPattern(String block, Pattern pattern, Color color, int fontStyle, int baseOffset) {
-        if (color == null) return;
-        Matcher matcher = pattern.matcher(block);
-        while (matcher.find()) {
-            StyleRange range = new StyleRange();
-            range.start = baseOffset + matcher.start();
-            range.length = matcher.end() - matcher.start();
-            range.foreground = color;
-            range.fontStyle = fontStyle;
-            chatArea.setStyleRange(range);
-        }
-    }
-
-    private static final Pattern KEYWORD_PATTERN = Pattern.compile(
-        "\\b(abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|goto|if|implements|import|instanceof|int|interface|long|native|new|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|void|volatile|while)\\b"
-    );
-
-    private static final Pattern STRING_PATTERN = Pattern.compile(
-        "\"(?:\\\\.|[^\\\\\"])*\""
-    );
-
-    private static final Pattern COMMENT_PATTERN = Pattern.compile(
-        "//.*?$|/\\*.*?\\*/",
-        Pattern.DOTALL | Pattern.MULTILINE
-    );
-
-    private void trimHistory() {
-        int limit = resolveHistoryLimit();
-        while (chatHistory.size() > limit) {
-            chatHistory.remove(0);
-        }
-    }
-
-    private void persistHistory() {
-        historyStore.save(resolveHistoryProject(), chatHistory, resolveHistoryLimit());
-    }
-
-    private String resolveHistoryProject() {
-        String project = workspaceService.getActiveProjectName();
-        return project == null ? "" : project;
-    }
-
-    private int resolveHistoryLimit() {
-        int value = CredentialsService.preferenceStore()
-            .getInt(PreferenceConstants.CHAT_MAX_HISTORY);
-        if (value <= 0) {
-            return 50;
-        }
-        return Math.min(value, 500);
-    }
-
-    // ===============================
-    // HELPERS
+    // RENDER
     // ===============================
     private void appendUser(String msg) {
+        // Línea en blanco antes del globo (solo uno para menor separación)
+        chatArea.append("\n");
         int start = chatArea.getCharCount();
-        chatArea.append("You:\n");
-
+        String userLabel = "You:";
+        chatArea.append(userLabel + "\n");
         StyleRange s = new StyleRange();
         s.start = start;
-        s.length = 4;
+        s.length = userLabel.length();
         s.fontStyle = SWT.BOLD;
         chatArea.setStyleRange(s);
-
-        renderContent(msg);
-        chatArea.append("\n\n");
-
+        int msgStart = chatArea.getCharCount();
+        renderMarkdownContent(msg);
+        // Solo un salto de línea después del globo
+        chatArea.append("\n");
         applyBubble(start, chatArea.getCharCount() - start, userBubble, userTextColor);
         scrollToEnd();
     }
 
     private void appendAIHeader() {
+        // Línea en blanco antes del globo
+        chatArea.append("\n");
         aiMessageStart = chatArea.getCharCount();
-        chatArea.append("AI:\n");
+        // Insertar espacio para el icono
+        chatArea.append(" ");
+        if (copilotIcon != null) {
+            StyleRange iconRange = new StyleRange();
+            iconRange.start = aiMessageStart;
+            iconRange.length = 1;
+            iconRange.data = copilotIcon;
+            chatArea.setStyleRange(iconRange);
+        }
+        chatArea.append("\n");
         scrollToEnd();
     }
 
-    private void appendSystem(String msg) {
+    private void appendAIResponse(String aiResponse) {
+        // Filtrar action e instrucciones internas para el modelo
+        String userVisible = extractUserVisible(aiResponse);
+        if (userVisible.isBlank()) {
+            // No mostrar nada si solo hay action/instrucción
+            return;
+        }
+        // Línea en blanco antes del globo (solo uno)
+        chatArea.append("\n");
         int start = chatArea.getCharCount();
-        chatArea.append("[SYSTEM] " + msg + "\n\n");
-        applyBubble(start, chatArea.getCharCount() - start, systemBubble, systemTextColor);
+        String aiLabel = "AI:";
+        // Insertar icono Copilot/AI antes del label
+        if (copilotIcon != null) {
+            chatArea.append(" ");
+            StyleRange iconRange = new StyleRange();
+            iconRange.start = chatArea.getCharCount() - 1;
+            iconRange.length = 1;
+            iconRange.data = copilotIcon;
+            chatArea.setStyleRange(iconRange);
+        }
+        chatArea.append(aiLabel + "\n");
+        StyleRange s = new StyleRange();
+        s.start = start;
+        s.length = aiLabel.length();
+        s.fontStyle = SWT.BOLD;
+        chatArea.setStyleRange(s);
+        int msgStart = chatArea.getCharCount();
+        renderMarkdownContent(userVisible);
+        // Solo un salto de línea después del globo
+        chatArea.append("\n");
+        applyBubble(start, chatArea.getCharCount() - start, aiBubble, aiTextColor);
         scrollToEnd();
     }
 
-    private void statusInfo(String msg) {
-        updateStatus("INFO", msg);
+    private void renderMarkdownContent(String text) {
+        if (text == null || text.isEmpty()) return;
+        markdownRenderer.append(chatArea, text);
     }
 
-    private void statusError(String msg) {
-        updateStatus("ERROR", msg);
-        logError(msg);
+    private boolean isOnlyAction(String text) {
+        if (text == null) return false;
+        String trimmed = text.trim();
+        // Detecta si es solo un action (línea única con [ACTION:...])
+        boolean onlyAction = trimmed.matches("^\\[ACTION:[^\\]]+].*$") ||
+               trimmed.matches("^\\[ACTION:[^\\]]+].*\\n*$");
+        // Detecta si es solo instrucciones internas
+        boolean onlyInstruction = trimmed.matches("(?s)^Puedes decidir si necesitas ejecutar más acciones.*usuario\\.?$");
+        // Detecta si es action + instrucción (en cualquier orden, con o sin saltos de línea)
+        boolean actionAndInstruction =
+            (onlyAction && trimmed.contains("Puedes decidir si necesitas ejecutar más acciones")) ||
+            (onlyInstruction && trimmed.contains("[ACTION:"));
+        return onlyAction || onlyInstruction || actionAndInstruction;
     }
 
-    private void updateStatus(String level, String msg) {
-        Display.getDefault().asyncExec(() -> {
-            if (!statusText.isDisposed()) {
-                statusText.setText("[" + level + "] " + msg);
+    private String extractUserVisible(String text) {
+        if (text == null) return "";
+        String result = text;
+        // Elimina líneas que sean solo [ACTION:...]
+        result = result.replaceAll("(?m)^\\[ACTION:[^\\]]+].*$", "");
+        // Elimina instrucciones internas para el modelo
+        result = result.replaceAll("(?s)Puedes decidir si necesitas ejecutar más acciones.*usuario\\.?$", "");
+        // Elimina espacios y saltos de línea sobrantes
+        result = result.replaceAll("^[ \t\r\n]+|[ \t\r\n]+$", "");
+        return result;
+    }
+
+    private Color getCodeBlockColor(String language) {
+        if (language == null) return userBubble;
+        switch (language.toLowerCase()) {
+            case "java": return Display.getDefault().getSystemColor(SWT.COLOR_YELLOW);
+            case "python": return Display.getDefault().getSystemColor(SWT.COLOR_GREEN);
+            case "xml": return Display.getDefault().getSystemColor(SWT.COLOR_CYAN);
+            case "json": return Display.getDefault().getSystemColor(SWT.COLOR_MAGENTA);
+            case "bash":
+            case "sh": return Display.getDefault().getSystemColor(SWT.COLOR_GRAY);
+            case "c": return Display.getDefault().getSystemColor(SWT.COLOR_RED);
+            case "cpp":
+            case "c++": return Display.getDefault().getSystemColor(SWT.COLOR_DARK_RED);
+            case "js":
+            case "javascript": return Display.getDefault().getSystemColor(SWT.COLOR_DARK_YELLOW);
+            case "ts":
+            case "typescript": return Display.getDefault().getSystemColor(SWT.COLOR_DARK_CYAN);
+            case "html": return Display.getDefault().getSystemColor(SWT.COLOR_DARK_MAGENTA);
+            case "css": return Display.getDefault().getSystemColor(SWT.COLOR_BLUE);
+            case "sql": return Display.getDefault().getSystemColor(SWT.COLOR_DARK_GREEN);
+            case "inline": return Display.getDefault().getSystemColor(SWT.COLOR_WHITE);
+            default: return userBubble;
+        }
+    }
+
+    private void renderContent(String text) {
+        if (text == null || text.isEmpty()) return;
+        String normalized = CodeFenceHelper.normalizeFenceSyntax(text);
+        List<CodeFenceHelper.CodeBlock> blocks = CodeFenceHelper.extractCodeBlocks(normalized);
+        int last = 0;
+        Matcher matcher = CodeFenceHelper.codeBlockMatcher(normalized);
+        for (CodeFenceHelper.CodeBlock block : blocks) {
+            matcher.find();
+            int start = matcher.start();
+            int end = matcher.end();
+            // Separación visual extra antes del bloque
+            chatArea.append("\n");
+            // Renderiza el texto antes del bloque
+            if (start > last) {
+                String before = normalized.substring(last, start);
+                renderInlineCode(before);
+            }
+            // Mostrar el lenguaje encima del bloque
+            if (!block.language.isEmpty()) {
+                int langStart = chatArea.getCharCount();
+                chatArea.append(block.language + "\n");
+                StyleRange langStyle = new StyleRange();
+                langStyle.start = langStart;
+                langStyle.length = block.language.length();
+                langStyle.fontStyle = SWT.BOLD;
+                langStyle.foreground = Display.getDefault().getSystemColor(SWT.COLOR_DARK_GREEN);
+                chatArea.setStyleRange(langStyle);
+            }
+            // Renderiza el bloque de código con color diferenciado y tooltip
+            appendCodeStyledWithTooltip(block.content, block.language);
+            // Separación visual extra después del bloque
+            chatArea.append("\n");
+            last = end;
+        }
+        // Renderiza el texto restante después del último bloque
+        if (last < normalized.length()) {
+            renderInlineCode(normalized.substring(last));
+        }
+    }
+
+    private void renderInlineCode(String text) {
+        if (text == null || text.isEmpty()) return;
+        int idx = 0;
+        Matcher m = Pattern.compile("`([^`]+)`").matcher(text);
+        while (m.find()) {
+            // Texto antes del bloque inline
+            if (m.start() > idx) {
+                markdownRenderer.append(chatArea, text.substring(idx, m.start()));
+            }
+            // Bloque inline
+            int codeStart = chatArea.getCharCount();
+            chatArea.append(m.group(1));
+            StyleRange s = new StyleRange();
+            s.start = codeStart;
+            s.length = m.group(1).length();
+            s.font = monoFont;
+            s.background = getCodeBlockColor("inline");
+            chatArea.setStyleRange(s);
+            idx = m.end();
+        }
+        // Texto restante
+        if (idx < text.length()) {
+            markdownRenderer.append(chatArea, text.substring(idx));
+        }
+    }
+
+    private void appendCodeStyledWithTooltip(String code, String language) {
+        int start = chatArea.getCharCount();
+        String block = ensureTrailingNewline(code);
+        chatArea.append(block);
+        StyleRange s = new StyleRange();
+        s.start = start;
+        s.length = block.length();
+        s.font = monoFont;
+        s.background = getCodeBlockColor(language);
+        // Mejor contraste para accesibilidad
+        s.foreground = Display.getDefault().getSystemColor(SWT.COLOR_BLACK);
+        // Tooltip con información del bloque
+        s.data = "Lenguaje: " + (language.isEmpty() ? "(desconocido)" : language) + ", líneas: " + block.split("\n").length;
+        chatArea.setStyleRange(s);
+        lastCodeBlock = code;
+        // Permitir copiar el bloque con doble clic
+        chatArea.addListener(SWT.MouseDoubleClick, e -> {
+            int offset = chatArea.getOffsetAtLocation(e.display.map(chatArea, null, e.x, e.y));
+            if (offset >= start && offset < start + block.length()) {
+                Clipboard cb = new Clipboard(Display.getDefault());
+                cb.setContents(new Object[]{code}, new Transfer[]{TextTransfer.getInstance()});
+                cb.dispose();
+                statusInfo("Bloque de código copiado al portapapeles");
             }
         });
+        // No aplicar applyBubble aquí: los bloques de código no deben tener burbuja/borde
     }
 
-    private void progressInfo(int currentTokens, int totalTokens) {
-        Display.getDefault().asyncExec(() -> {
-            if (progressText != null && !progressText.isDisposed()) {
-                progressText.setText(currentTokens + "/" + totalTokens);
+    // Helper para restaurar mensajes del historial
+    private void appendMessage(String role, String content) {
+        if (role == null) role = "";
+        if (content == null) content = "";
+        switch (role.toLowerCase()) {
+            case "user" -> appendUser(content);
+            case "assistant" -> {
+                appendAIHeader();
+                int msgStart = chatArea.getCharCount();
+                chatArea.append(content + "\n");
+                // Fondo IA, alineación izquierda
+                applyBubble(msgStart, chatArea.getCharCount() - msgStart, aiBubble, aiTextColor);
+                // Línea en blanco después del globo
+                chatArea.append("\n");
+                aiMessageStart = -1;
             }
-        });
+            default -> appendSystem(content);
+        }
     }
 
-    private void resetProgress() {
-        progressInfo(0, 0);
+    // ===============================
+    // HELPERS
+    // ===============================
+    private void copyLastCodeBlock() {
+        Clipboard cb = new Clipboard(Display.getDefault());
+        cb.setContents(new Object[]{lastCodeBlock}, new Transfer[]{TextTransfer.getInstance()});
+        cb.dispose();
+        statusInfo("Código copiado al portapapeles");
     }
 
-    private void applyBubble(int start, int length, Color background) {
-        applyBubble(start, length, background, null);
+    private void applyLastCodeBlock() {
+        String diff = diffService.diff(
+            workspaceService.getActiveEditorContent(),
+            lastCodeBlock
+        );
+        if (ApplyChangesDialog.confirm(getSite().getShell(), diff)) {
+            workspaceService.applyFullToActiveEditor(lastCodeBlock);
+            statusInfo("Código aplicado en el editor activo");
+        }
+    }
+
+    private void loadHistory() {
+        String project = workspaceService.getActiveProjectName();
+        if (controller != null) {
+            for (ChatMessage msg : controller.loadHistory(project)) {
+                appendMessage(msg.getRole(), msg.getContent());
+            }
+        }
+    }
+    
+    private void showErrorLog() {
+        MessageDialog.openInformation(getSite().getShell(), "Errors", String.join("\n", errorLog));
+    }
+
+    private void cancelStreaming() {
+        if (currentCancel != null) currentCancel.run();
+        statusInfo("Respuesta cancelada");
+    }
+
+    private void initColors() {
+        Display d = Display.getDefault();
+        monoFont = new Font(d, "Consolas", 10, SWT.NORMAL);
+        userBubble = d.getSystemColor(SWT.COLOR_INFO_BACKGROUND);
+        aiBubble = d.getSystemColor(SWT.COLOR_TITLE_INACTIVE_BACKGROUND_GRADIENT);
+        systemBubble = d.getSystemColor(SWT.COLOR_GRAY);
+        userTextColor = d.getSystemColor(SWT.COLOR_BLACK);
+        aiTextColor = d.getSystemColor(SWT.COLOR_DARK_BLUE);
+        systemTextColor = d.getSystemColor(SWT.COLOR_WHITE);
     }
 
     private void applyBubble(int start, int length, Color background, Color foreground) {
@@ -653,69 +644,35 @@ public class ChatView extends ViewPart {
         chatArea.setStyleRange(range);
     }
 
-    private void logError(String msg) {
-        if (msg == null || msg.isBlank()) return;
-        errorLog.add(msg);
-        if (errorLog.size() > 50) {
-            errorLog.remove(0);
-        }
-        updateErrorBadge();
+    private void statusInfo(String msg) {
+        updateStatus("INFO", msg);
     }
 
-    private void updateErrorBadge() {
-        if (errorsButton == null || errorsButton.isDisposed()) return;
-        errorsButton.setText("Errores " + errorLog.size());
-    }
-
-    private void showErrorLog() {
-        String title = "Registro de errores";
-        if (errorLog.isEmpty()) {
-            MessageDialog.openInformation(getSite().getShell(), title, "Sin errores recientes");
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        int start = Math.max(0, errorLog.size() - 20);
-        for (int i = start; i < errorLog.size(); i++) {
-            sb.append(i + 1).append(") ").append(errorLog.get(i)).append("\n");
-        }
-        MessageDialog.openInformation(getSite().getShell(), title, sb.toString());
-    }
-
-    private void startSpinner() {
+    private void updateStatus(String level, String msg) {
         Display.getDefault().asyncExec(() -> {
-            if (spinnerLabel != null && !spinnerLabel.isDisposed()) {
-                spinnerLabel.setText("⏳");
+            if (!statusText.isDisposed()) {
+                statusText.setText("[" + level + "] " + msg);
             }
         });
     }
 
-    private void stopSpinner() {
-        Display.getDefault().asyncExec(() -> {
-            if (spinnerLabel != null && !spinnerLabel.isDisposed()) {
-                spinnerLabel.setText("⟳");
-            }
-        });
-    }
-    
-    private boolean requiresAsciiOnly() {
-        return aiService instanceof OllamaChatService;
+    private void updateProgressTokens(int tokens) {
+        if (progressText != null && !progressText.isDisposed()) {
+            progressText.setText("Tokens: " + tokens);
+        }
     }
 
-    private String sanitizeForOllama(String text) {
-        if (text == null) return "";
-
-        return text
-            .replace("\r\n", "\n")
-            .replace("\r", "\n")
-            .replaceAll("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]", "")
-            .replaceAll("[^\\x00-\\x7F]", "")
-            .trim();
+    private void setStreamingState(boolean streaming) {
+        if (spinnerButton != null && !spinnerButton.isDisposed()) {
+            spinnerButton.setEnabled(streaming);
+            spinnerButton.setText(streaming ? "⟳ (ON)" : "⟳");
+        }
     }
-    
-    private String limitContext(String context) {
-        int MAX_CHARS = 6000; // Ollama safe
-        if (context.length() <= MAX_CHARS) return context;
-        return context.substring(context.length() - MAX_CHARS);
+
+    private void updateErrorCount() {
+        if (errorsButton != null && !errorsButton.isDisposed()) {
+            errorsButton.setText("Errors " + errorLog.size());
+        }
     }
 
     private void scrollToEnd() {
@@ -723,221 +680,6 @@ public class ChatView extends ViewPart {
         int lastLine = Math.max(chatArea.getLineCount() - 1, 0);
         chatArea.setTopIndex(lastLine);
         chatArea.setSelection(chatArea.getCharCount());
-    }
-
-    private boolean handleShorthand(String message) {
-        if (message == null || !message.startsWith("/")) {
-            return false;
-        }
-
-        String[] parts = message.split("\\s+");
-        String cmd = parts[0].toLowerCase();
-        String project = workspaceService.getActiveProjectName();
-
-        chatHistory.add(new ChatMessage("user", message));
-        trimHistory();
-
-        switch (cmd) {
-            case "/read" -> {
-                if (parts.length < 2) {
-                    appendSystem("Uso: /read <ruta-relativa>");
-                    return true;
-                }
-                if (project.isEmpty()) {
-                    appendSystem("No hay proyecto activo en el editor");
-                    return true;
-                }
-                String path = message.substring(message.indexOf(' ')).trim();
-                if (path.isEmpty()) {
-                    appendSystem("Debes indicar la ruta");
-                    return true;
-                }
-                appendSystem("Leyendo " + path);
-                String content = workspaceService.readFile(project, path);
-                if (content == null || content.isBlank()) {
-                    appendSystem("No se pudo leer el archivo");
-                } else {
-                    appendFormatted(content);
-                    chatHistory.add(new ChatMessage("assistant", content));
-                }
-                trimHistory();
-                persistHistory();
-                return true;
-            }
-            case "/list" -> {
-                if (project.isEmpty()) {
-                    appendSystem("No hay proyecto activo en el editor");
-                    return true;
-                }
-                int depth = clamp(parseOrDefault(parts, 1, CredentialsService.preferenceStore().getInt(PreferenceConstants.LIST_MAX_DEPTH)), 1, 10);
-                int limit = clamp(parseOrDefault(parts, 2, CredentialsService.preferenceStore().getInt(PreferenceConstants.LIST_MAX_LIMIT)), 10, 1000);
-                String listing = workspaceService.listProjectTree(project, depth, limit);
-                appendSystem("Listado de archivos (" + project + ") depth=" + depth + " limit=" + limit);
-                appendFormatted(listing);
-                chatHistory.add(new ChatMessage("assistant", listing));
-                trimHistory();
-                persistHistory();
-                return true;
-            }
-            case "/ctx" -> {
-                appendSystem("Snapshot del workspace...");
-                String snapshot = workspaceService.readWorkspaceSnapshot();
-                appendFormatted(snapshot);
-                chatHistory.add(new ChatMessage("assistant", snapshot));
-                trimHistory();
-                persistHistory();
-                return true;
-            }
-            case "/doc" -> {
-                String path = parts.length >= 2 ? parts[1] : "README.md";
-                if (project.isEmpty()) {
-                    appendSystem("No hay proyecto activo en el editor");
-                    return true;
-                }
-                String content = workspaceService.readFile(project, path);
-                if (content == null || content.isBlank()) {
-                    appendSystem("No se pudo leer " + path);
-                } else {
-                    appendFormatted(content);
-                    chatHistory.add(new ChatMessage("assistant", content));
-                    trimHistory();
-                    persistHistory();
-                }
-                return true;
-            }
-            case "/recent" -> {
-                int n = parts.length >= 2 ? clamp(parseOrDefault(parts, 1, 5), 1, 20) : 5;
-                appendSystem("Últimos " + n + " mensajes:");
-                List<ChatMessage> tail = chatHistory.subList(Math.max(0, chatHistory.size() - n), chatHistory.size());
-                StringBuilder sb = new StringBuilder();
-                for (ChatMessage msg : tail) {
-                    sb.append(msg.getRole()).append(": ").append(snippet(msg.getContent())).append("\n");
-                }
-                appendFormatted(sb.toString());
-                chatHistory.add(new ChatMessage("assistant", sb.toString()));
-                trimHistory();
-                persistHistory();
-                return true;
-            }
-            case "/history" -> {
-                if (parts.length < 2) {
-                    appendSystem("Uso: /history <termino>");
-                    return true;
-                }
-                String term = message.substring(message.indexOf(' ')).trim().toLowerCase();
-                StringBuilder hits = new StringBuilder();
-                int count = 0;
-                for (ChatMessage msg : chatHistory) {
-                    if (msg.getContent() != null && msg.getContent().toLowerCase().contains(term)) {
-                        hits.append(msg.getRole()).append(": ").append(snippet(msg.getContent())).append("\n");
-                        count++;
-                        if (count >= 20) break;
-                    }
-                }
-                if (count == 0) {
-                    appendSystem("Sin coincidencias para '" + term + "'");
-                } else {
-                    appendSystem("Coincidencias: " + count);
-                    appendFormatted(hits.toString());
-                    chatHistory.add(new ChatMessage("assistant", hits.toString()));
-                    trimHistory();
-                    persistHistory();
-                }
-                return true;
-            }
-            case "/clearhistory" -> {
-                chatHistory.clear();
-                persistHistory();
-                historyStore.clear(project);
-                chatArea.setText("");
-                appendSystem("Historial borrado para proyecto " + (project.isEmpty() ? "global" : project));
-                return true;
-            }
-            default -> {
-                chatHistory.remove(chatHistory.size() - 1);
-                return false;
-            }
-        }
-    }
-
-    private int parseOrDefault(String[] parts, int index, int defaultValue) {
-        if (parts == null || index >= parts.length) return defaultValue;
-        try {
-            return Integer.parseInt(parts[index]);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private int clamp(int value, int min, int max) {
-        if (value < min) return min;
-        if (value > max) return max;
-        return value;
-    }
-
-    private String snippet(String text) {
-        if (text == null) return "";
-        String clean = text.replace('\n', ' ');
-        if (clean.length() <= 140) return clean;
-        return clean.substring(0, 140) + "…";
-    }
-
-    private void cancelStreaming() {
-        if (currentCancel != null) {
-            currentCancel.run();
-            appendSystem("Respuesta cancelada");
-            statusInfo("Cancelado");
-            clearCancelHandle();
-        }
-    }
-
-    private void clearCancelHandle() {
-        currentCancel = null;
-        stopButton.setEnabled(false);
-    }
-
-    private void copyLastCodeBlock() {
-        if (lastCodeBlock == null || lastCodeBlock.isBlank()) {
-            statusError("No hay bloque de código reciente para copiar");
-            return;
-        }
-        Clipboard cb = new Clipboard(Display.getDefault());
-        cb.setContents(new Object[] { lastCodeBlock }, new Transfer[] { TextTransfer.getInstance() });
-        cb.dispose();
-        statusInfo("Código copiado al portapapeles");
-    }
-
-    private void applyLastCodeBlock() {
-        if (lastCodeBlock == null || lastCodeBlock.isBlank()) {
-            statusError("No hay bloque de código reciente para aplicar");
-            return;
-        }
-        String currentSelection = workspaceService.getActiveSelectionText();
-        if (currentSelection == null) currentSelection = "";
-
-        boolean replaceWholeFile = currentSelection.isEmpty();
-        String original = replaceWholeFile
-            ? workspaceService.getActiveEditorContent()
-            : currentSelection;
-
-        if (original == null) original = "";
-
-        String diff = diffService.diff(original, lastCodeBlock);
-        boolean ok = ApplyChangesDialog.confirm(getSite().getShell(), diff);
-        if (!ok) {
-            statusInfo("Aplicación cancelada");
-            return;
-        }
-
-        boolean applied = replaceWholeFile
-            ? workspaceService.applyFullToActiveEditor(lastCodeBlock)
-            : workspaceService.applyToActiveEditor(lastCodeBlock);
-
-        if (applied) {
-            statusInfo("Código aplicado en el editor activo");
-        } else {
-            statusError("No se pudo aplicar el código (sin editor activo)");
-        }
     }
 
     @Override
@@ -949,5 +691,24 @@ public class ChatView extends ViewPart {
     public void dispose() {
         if (monoFont != null) monoFont.dispose();
         super.dispose();
+    }
+
+    private void appendAutomatedUser(String msg) {
+        // Mensaje automático generado por acción, se agrega como mensaje de usuario
+        appendUser(msg);
+    }
+
+    private String ensureTrailingNewline(String code) {
+        if (code == null || code.isEmpty()) {
+            return "\n";
+        }
+        return code.endsWith("\n") ? code : code + "\n";
+    }
+
+    private void appendSystem(String msg) {
+        int start = chatArea.getCharCount();
+        chatArea.append("[SYSTEM] " + msg + "\n\n");
+        applyBubble(start, chatArea.getCharCount() - start, systemBubble, systemTextColor);
+        scrollToEnd();
     }
 }

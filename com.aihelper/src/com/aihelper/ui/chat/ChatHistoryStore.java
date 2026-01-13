@@ -17,72 +17,117 @@ import com.aihelper.model.ChatMessage;
 
 /**
  * Persiste el historial de chat en el directorio de estado del plugin.
- * Formato simple por línea: role|base64(content)
+ *
+ * Formato:
+ *   role|base64(content)
+ *
+ * Un archivo por proyecto (o global si no hay proyecto activo).
  */
-public class ChatHistoryStore {
+public final class ChatHistoryStore {
 
-    private static final String FILE_NAME = "chat-history";
+    private static final String FILE_PREFIX = "chat-history";
 
-    public List<ChatMessage> load(String project, int maxEntries) {
+    public List<ChatMessage> load(String projectName, int maxEntries) {
         List<ChatMessage> messages = new ArrayList<>();
-        File file = resolveFile(project);
+        File file = resolveFile(projectName);
+
         if (file == null || !file.exists()) {
             return messages;
         }
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(file, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader =
+                     new BufferedReader(new FileReader(file, StandardCharsets.UTF_8))) {
+
             String line;
             while ((line = reader.readLine()) != null) {
                 int sep = line.indexOf('|');
-                if (sep <= 0) continue;
+                if (sep <= 0) {
+                    continue;
+                }
+
                 String role = line.substring(0, sep);
                 String encoded = line.substring(sep + 1);
-                String content = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+
+                String content = new String(
+                        Base64.getDecoder().decode(encoded),
+                        StandardCharsets.UTF_8
+                );
+
                 messages.add(new ChatMessage(role, content));
+
                 if (messages.size() >= maxEntries) {
                     break;
                 }
             }
         } catch (Exception ignored) {
+            // Silencioso a propósito: historial nunca debe romper la UI
         }
 
         return messages;
     }
 
-    public void save(String project, List<ChatMessage> history, int limit) {
-        if (history == null || history.isEmpty()) return;
-        File file = resolveFile(project);
-        if (file == null) return;
+    public void save(String projectName, List<ChatMessage> history, int limit) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+
+        File file = resolveFile(projectName);
+        if (file == null) {
+            return;
+        }
 
         int start = Math.max(0, history.size() - limit);
         List<ChatMessage> tail = history.subList(start, history.size());
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8, false))) {
+        try (BufferedWriter writer =
+                     new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8, false))) {
+
             for (ChatMessage msg : tail) {
                 String role = msg.getRole() == null ? "" : msg.getRole();
                 String content = msg.getContent() == null ? "" : msg.getContent();
-                String encoded = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
-                writer.write(role + "|" + encoded);
+
+                String encoded = Base64.getEncoder()
+                        .encodeToString(content.getBytes(StandardCharsets.UTF_8));
+
+                writer.write(role);
+                writer.write('|');
+                writer.write(encoded);
                 writer.newLine();
             }
         } catch (Exception ignored) {
         }
     }
 
-    public void clear(String project) {
-        File file = resolveFile(project);
+    public void clear(String projectName) {
+        File file = resolveFile(projectName);
         if (file != null && file.exists()) {
-            file.delete();
+            try {
+                java.nio.file.Files.delete(file.toPath());
+            } catch (Exception e) {
+                // Log o ignora según política
+            }
         }
     }
 
-    private File resolveFile(String project) {
+    private File resolveFile(String projectName) {
         Activator activator = Activator.getDefault();
-        if (activator == null) return null;
+        if (activator == null) {
+            return null;
+        }
+
         IPath state = activator.getStateLocation();
-        if (state == null) return null;
-        String suffix = (project == null || project.isBlank()) ? "global" : project;
+        if (state == null) {
+            return null;
+        }
+
+        String suffix = (projectName == null || projectName.isBlank())
+                ? "global"
+                : projectName;
+
         String safe = suffix.replaceAll("[^A-Za-z0-9._-]", "_");
-        return state.append(FILE_NAME + "-" + safe + ".txt").toFile();
+
+        return state
+                .append(FILE_PREFIX + "-" + safe + ".txt")
+                .toFile();
     }
 }

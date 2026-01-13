@@ -1,7 +1,8 @@
 package com.aihelper.ui;
 
 
-import org.eclipse.jface.text.*;
+import org.eclipse.jface.text.ITextListener;
+import org.eclipse.jface.text.TextEvent;
 
 public class InlineCompletionListener implements ITextListener {
 

@@ -2,7 +2,11 @@ package com.aihelper.ui.chat;
 
 import java.util.List;
 
+import org.eclipse.jface.preference.IPreferenceStore;
+
+import com.aihelper.Activator;
 import com.aihelper.model.ChatMessage;
+import com.aihelper.preferences.PreferenceConstants;
 import com.aihelper.workspace.WorkspaceService;
 
 /**
@@ -76,8 +80,21 @@ public class ChatContextBuilder {
     }
 
     public String buildContext(List<ChatMessage> history) {
+        int maxHistory = 50;
+        try {
+            IPreferenceStore store = Activator.getDefault() != null ? Activator.getDefault().getPreferenceStore() : null;
+            if (store != null) {
+                maxHistory = store.getInt(PreferenceConstants.CHAT_MAX_HISTORY);
+            }
+        } catch (Exception e) {
+            // fallback to default
+        }
+        List<ChatMessage> limitedHistory = history;
+        if (history != null && history.size() > maxHistory) {
+            limitedHistory = history.subList(history.size() - maxHistory, history.size());
+        }
         return TEMPLATE.formatted(
-            formatHistory(history),
+            formatHistory(limitedHistory),
             workspaceService.getActiveEditorFileName(),
             workspaceService.getActiveEditorFileExtension(),
             workspaceService.getActiveEditorContent()

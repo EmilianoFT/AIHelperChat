@@ -1,5 +1,7 @@
 package com.aihelper.ui.chat;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +27,8 @@ public final class CodeFenceHelper {
         "```[ \t]*([A-Za-z0-9_+#.-]+)?[ \t]*(?:\r?\n|$)([\\s\\S]*?)```[ \t]*(?:\r?\n|$)",
         Pattern.MULTILINE
     );
+
+    private static final Pattern INLINE_CODE_PATTERN = Pattern.compile("`([^`]+)`");
 
     private CodeFenceHelper() {
     }
@@ -82,5 +86,36 @@ public final class CodeFenceHelper {
 
     public static Matcher codeBlockMatcher(String normalizedText) {
         return CODE_BLOCK_PATTERN.matcher(normalizedText);
+    }
+
+    public static class CodeBlock {
+        public final String language;
+        public final String content;
+        public CodeBlock(String language, String content) {
+            this.language = language != null ? language : "";
+            this.content = content != null ? content : "";
+        }
+    }
+
+    public static List<CodeBlock> extractCodeBlocks(String text) {
+        String normalized = normalizeFenceSyntax(text);
+        Matcher m = codeBlockMatcher(normalized);
+        List<CodeBlock> blocks = new ArrayList<>();
+        while (m.find()) {
+            String lang = m.group(1);
+            String content = m.group(2);
+            blocks.add(new CodeBlock(lang, content));
+        }
+        return blocks;
+    }
+
+    public static List<CodeBlock> extractInlineCodeBlocks(String text) {
+        List<CodeBlock> blocks = new ArrayList<>();
+        if (text == null || text.isEmpty()) return blocks;
+        Matcher m = INLINE_CODE_PATTERN.matcher(text);
+        while (m.find()) {
+            blocks.add(new CodeBlock("inline", m.group(1)));
+        }
+        return blocks;
     }
 }

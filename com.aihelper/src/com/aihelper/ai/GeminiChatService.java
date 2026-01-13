@@ -115,7 +115,7 @@ public class GeminiChatService implements AiChatService {
         while ((index = json.indexOf(marker, index)) != -1) {
             int startQuote = json.indexOf('"', index + marker.length());
             if (startQuote == -1) break;
-            startQuote++; // move past quote
+            startQuote++;
 
             StringBuilder chunk = new StringBuilder();
             boolean escaping = false;
@@ -124,32 +124,25 @@ public class GeminiChatService implements AiChatService {
                 char c = json.charAt(i);
                 if (escaping) {
                     switch (c) {
-                        case 'n' -> chunk.append('\n');
+                        case 'n' -> chunk.append('\n'); // Solo \n, no \r
                         case 't' -> chunk.append('\t');
-                        case 'r' -> { /* omit */ }
                         case '"' -> chunk.append('"');
                         case '\\' -> chunk.append('\\');
                         default -> chunk.append(c);
                     }
                     escaping = false;
-                    continue;
-                }
-
-                if (c == '\\') {
+                } else if (c == '\\') {
                     escaping = true;
-                    continue;
-                }
-
-                if (c == '"') {
+                } else if (c == '"') {
                     index = i + 1;
                     break;
+                } else {
+                    chunk.append(c);
                 }
-
-                chunk.append(c);
             }
 
-            if (chunk.length() > 0) {
-                if (full.length() > 0) {
+            if (!chunk.isEmpty()) {
+                if (!full.isEmpty()) {
                     full.append('\n');
                 }
                 full.append(chunk);

@@ -1,8 +1,5 @@
 package com.aihelper.ai;
 
-import com.aihelper.ai.util.JsonHelper;
-import com.aihelper.preferences.CredentialsService;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,6 +9,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import com.aihelper.ai.util.JsonHelper;
+import com.aihelper.preferences.CredentialsService;
 
 public class OllamaChatService implements AiChatService {
 

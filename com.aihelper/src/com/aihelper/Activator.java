@@ -6,23 +6,23 @@ import org.osgi.framework.BundleContext;
 public class Activator extends AbstractUIPlugin {
 
     public static final String PLUGIN_ID = "com.aihelper";
-    private static Activator plugin;
 
-    public Activator() {}
+    private static Activator instance;
 
     @Override
     public void start(BundleContext context) throws Exception {
         super.start(context);
-        plugin = this;
+        instance = this;
     }
 
     @Override
     public void stop(BundleContext context) throws Exception {
-        plugin = null;
+        instance = null;
         super.stop(context);
     }
 
     public static Activator getDefault() {
-        return plugin;
+        return instance;
     }
 }
+

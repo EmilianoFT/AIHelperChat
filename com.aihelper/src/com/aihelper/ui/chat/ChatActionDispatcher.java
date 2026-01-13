@@ -82,6 +82,11 @@ public class ChatActionDispatcher {
         }
     }
 
+    private String nextStepMessage(String actionResult) {
+        return actionResult +
+            "\n\nPuedes decidir si necesitas ejecutar más acciones (envía otro [ACTION:...] si es necesario) o si ya tienes suficiente información para contestar al usuario. Si necesitas más datos, pide la acción correspondiente. Si ya puedes responder, hazlo directamente al usuario.";
+    }
+
     private boolean handleReadFile(String text) {
         String project = null;
         String path = null;
@@ -104,11 +109,11 @@ public class ChatActionDispatcher {
 
         String content = workspaceService.readFile(project, path);
         if (content == null || content.isBlank()) {
-            automatedSender.accept("[SYSTEM] Archivo no encontrado o vacío: " + path);
+            automatedSender.accept(nextStepMessage("[SYSTEM] Archivo no encontrado o vacío: " + path));
             return true;
         }
 
-        automatedSender.accept("Contenido solicitado:\n" + content);
+        automatedSender.accept(nextStepMessage("Contenido solicitado:\n" + content));
         return true;
     }
 
@@ -116,8 +121,7 @@ public class ChatActionDispatcher {
         if (!READ_PROJECT_PATTERN.matcher(text).find()) {
             return false;
         }
-        automatedSender.accept("Snapshot del proyecto:\n" +
-            workspaceService.readWorkspaceSnapshot());
+        automatedSender.accept(nextStepMessage("Snapshot del proyecto:\n" + workspaceService.readWorkspaceSnapshot()));
         return true;
     }
 
@@ -131,8 +135,7 @@ public class ChatActionDispatcher {
         int depth = Math.min(resolveMaxDepth(), parseOrDefault(matcher.group(2), 2));
         int limit = Math.min(resolveMaxLimit(), parseOrDefault(matcher.group(3), 200));
 
-        automatedSender.accept("Listado de archivos:\n" +
-            workspaceService.listProjectTree(project, depth, limit));
+        automatedSender.accept(nextStepMessage("Listado de archivos:\n" + workspaceService.listProjectTree(project, depth, limit)));
         return true;
     }
 
@@ -144,7 +147,7 @@ public class ChatActionDispatcher {
         String project = stripQuotes(matcher.group(1));
         String query = stripQuotes(matcher.group(2));
         int limit = Math.min(resolveMaxLimit(), parseOrDefault(matcher.group(3), 50));
-        automatedSender.accept("Búsqueda:\n" + workspaceService.searchText(project, query, limit));
+        automatedSender.accept(nextStepMessage("Búsqueda:\n" + workspaceService.searchText(project, query, limit)));
         return true;
     }
 
@@ -166,10 +169,10 @@ public class ChatActionDispatcher {
         int end = parseOrDefault(endStr, start + 200);
         String content = workspaceService.readFileRange(project, path, start, end);
         if (content == null || content.isBlank()) {
-            automatedSender.accept("[SYSTEM] Rango vacío o archivo no encontrado: " + path);
+            automatedSender.accept(nextStepMessage("[SYSTEM] Rango vacío o archivo no encontrado: " + path));
             return true;
         }
-        automatedSender.accept("Contenido solicitado (" + start + "-" + end + "):\n" + content);
+        automatedSender.accept(nextStepMessage("Contenido solicitado (" + start + "-" + end + "):\n" + content));
         return true;
     }
 
@@ -179,9 +182,9 @@ public class ChatActionDispatcher {
         }
         String content = workspaceService.getActiveEditorContent();
         if (content == null || content.isBlank()) {
-            automatedSender.accept("[SYSTEM] No hay editor activo o está vacío");
+            automatedSender.accept(nextStepMessage("[SYSTEM] No hay editor activo o está vacío"));
         } else {
-            automatedSender.accept("Archivo activo:\n" + content);
+            automatedSender.accept(nextStepMessage("Archivo activo:\n" + content));
         }
         return true;
     }
@@ -192,9 +195,9 @@ public class ChatActionDispatcher {
         }
         String sel = workspaceService.getActiveSelectionText();
         if (sel == null || sel.isBlank()) {
-            automatedSender.accept("[SYSTEM] No hay selección activa");
+            automatedSender.accept(nextStepMessage("[SYSTEM] No hay selección activa"));
         } else {
-            automatedSender.accept("Selección activa:\n" + sel);
+            automatedSender.accept(nextStepMessage("Selección activa:\n" + sel));
         }
         return true;
     }
@@ -203,7 +206,7 @@ public class ChatActionDispatcher {
         if (!LIST_OPEN_FILES_PATTERN.matcher(text).find()) {
             return false;
         }
-        automatedSender.accept("Archivos abiertos:\n" + workspaceService.listOpenFiles());
+        automatedSender.accept(nextStepMessage("Archivos abiertos:\n" + workspaceService.listOpenFiles()));
         return true;
     }
 
