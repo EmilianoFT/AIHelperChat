@@ -104,7 +104,7 @@ public class ChatView extends ViewPart {
 
         contextBuilder = new ChatContextBuilder(workspaceService);
         // Instanciar el dispatcher para acciones automáticas
-        actionDispatcher = new ChatActionDispatcher(workspaceService, this::appendAutomatedUser);
+        actionDispatcher = new ChatActionDispatcher(workspaceService, (msg) -> appendAutomatedUser(msg, true));
 
         loadHistory();
         initProvider();
@@ -693,9 +693,15 @@ public class ChatView extends ViewPart {
         super.dispose();
     }
 
-    private void appendAutomatedUser(String msg) {
-        // Mensaje automático generado por acción, se agrega como mensaje de usuario
+    private void appendAutomatedUser(String msg, boolean silent) {
+        // Si es silencioso, solo guardar en historial, no mostrar en chatArea
+        if (silent) {
+            chatHistory.add(new ChatMessage("user", msg));
+            // No mostrar en chatArea
+            return;
+        }
         appendUser(msg);
+        chatHistory.add(new ChatMessage("user", msg));
     }
 
     private String ensureTrailingNewline(String code) {

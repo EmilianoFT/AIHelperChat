@@ -2,7 +2,7 @@
 <feature
     id="com.aihelper.feature"
     label="AI Helper"
-    version="1.0.0"
+    version="1.0.1"
     image="icons/aihelper.png"
     provider-name="EmilianoFT">
 

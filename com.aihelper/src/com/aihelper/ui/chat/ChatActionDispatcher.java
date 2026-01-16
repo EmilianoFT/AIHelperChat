@@ -50,6 +50,7 @@ public class ChatActionDispatcher {
     private static final Pattern READ_ACTIVE_SELECTION_PATTERN = Pattern.compile("\\[ACTION:READ_ACTIVE_SELECTION\\]", Pattern.CASE_INSENSITIVE);
     private static final Pattern LIST_OPEN_FILES_PATTERN = Pattern.compile("\\[ACTION:LIST_OPEN_FILES\\]", Pattern.CASE_INSENSITIVE);
     private static final Pattern READ_PROJECT_PATTERN = Pattern.compile("\\[ACTION:READ_PROJECT\\]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern READ_PROJECT_FULL_PATTERN = Pattern.compile("\\[ACTION:READ_PROJECT_FULL\\]\\s*project=([^\\s\"]+|\"[^\"]+\")", Pattern.CASE_INSENSITIVE);
 
     private final WorkspaceService workspaceService;
     private final Consumer<String> automatedSender;
@@ -67,7 +68,8 @@ public class ChatActionDispatcher {
             this::handleReadProject,
             this::handleListFiles,
             this::handleSearchText,
-            this::handleListOpenFiles
+            this::handleListOpenFiles,
+            this::handleReadProjectFull // Nuevo handler
         );
     }
 
@@ -207,6 +209,17 @@ public class ChatActionDispatcher {
             return false;
         }
         automatedSender.accept(nextStepMessage("Archivos abiertos:\n" + workspaceService.listOpenFiles()));
+        return true;
+    }
+
+    private boolean handleReadProjectFull(String text) {
+        Matcher matcher = READ_PROJECT_FULL_PATTERN.matcher(text);
+        if (!matcher.find()) {
+            return false;
+        }
+        String project = stripQuotes(matcher.group(1));
+        String listing = workspaceService.listAllFilesRecursive(project);
+        automatedSender.accept(nextStepMessage("Listado completo de archivos del proyecto '" + project + "':\n" + listing));
         return true;
     }
 

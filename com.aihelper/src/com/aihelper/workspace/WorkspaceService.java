@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
@@ -354,5 +355,31 @@ public class WorkspaceService {
             return file.getProject().getName();
         }
         return "";
+    }
+    
+    public String listAllFilesRecursive(String project) {
+        StringBuilder sb = new StringBuilder();
+        IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+        IProject p = root.getProject(project);
+        if (p == null || !p.exists() || !p.isOpen()) {
+            return "[SYSTEM] Proyecto no encontrado o no abierto: " + project;
+        }
+        try {
+            listFilesRecursiveHelper(p, sb, "");
+        } catch (CoreException e) {
+            return "[SYSTEM] Error al listar archivos: " + e.getMessage();
+        }
+        return sb.toString();
+    }
+
+    private void listFilesRecursiveHelper(IResource resource, StringBuilder sb, String prefix) throws CoreException {
+        if (resource.getType() == IResource.FILE) {
+            sb.append(prefix).append(resource.getName()).append("\n");
+        } else if (resource instanceof IContainer) {
+            IContainer container = (IContainer) resource;
+            for (IResource r : container.members()) {
+                listFilesRecursiveHelper(r, sb, prefix + (prefix.isEmpty() ? "" : "/"));
+            }
+        }
     }
 }
