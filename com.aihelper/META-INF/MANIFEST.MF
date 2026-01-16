@@ -2,6 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: AI Helper Chat for Eclipse
 Bundle-SymbolicName: com.aihelper;singleton:=true
+Bundle-Vendor: Emiliano Traba
 Bundle-Version: 1.0.1
 Bundle-Icon: icons/aihelper-icon.png
 Automatic-Module-Name: com.aihelper
