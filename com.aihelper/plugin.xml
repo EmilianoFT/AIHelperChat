@@ -6,15 +6,16 @@
    <extension
          point="org.eclipse.ui.views">
       <category
-         id="com.aihelper.ui.category"
-         name="AI Helper">
+            id="com.aihelper.ui.category"
+            name="AI Helper"
+            parentCategory="org.eclipse.ui">
    	</category>
       <view
             id="com.aihelper.ui.chatView"
             name="AI Helper Chat"
             class="com.aihelper.ui.ChatView"
             category="com.aihelper.ui.category"
-            icon="icons/aihelper-icon.png">
+            icon="$nl$/icons/aihelper-icon.png">
       </view>
    </extension>
    
@@ -28,9 +29,10 @@
    <extension
          point="org.eclipse.ui.preferencePages">
       <page
+            category="com.aihelper.preferences"
+            class="com.aihelper.preferences.CredentialsPreferencePage"
             id="com.aihelper.preferences"
-            name="AI Helper Chat"
-            class="com.aihelper.preferences.CredentialsPreferencePage">
+            name="AI Helper Chat">
       </page>
    </extension>
 
