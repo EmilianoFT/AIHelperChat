@@ -100,10 +100,6 @@ $artifactJars = @(
     (Join-Path $RepoRoot "release\artifacts.jar"),
     (Join-Path $RepoRoot "docs\artifacts.jar")
 )
-$expectedMappings = @(
-    '${repoUrl}/plugins/${id}_${version}.jar',
-    '${repoUrl}/features/${id}_${version}.jar'
-)
 
 foreach ($artifactJar in $artifactJars) {
     if (-not (Test-Path $artifactJar)) {
@@ -115,13 +111,37 @@ foreach ($artifactJar in $artifactJars) {
         throw "No encontre artifacts.xml dentro de $artifactJar"
     }
 
-    foreach ($expectedMapping in $expectedMappings) {
-        if ($artifactsXml -notlike ("*" + $expectedMapping + "*")) {
-            throw "El archivo $artifactJar no contiene el mapping esperado: $expectedMapping"
-        }
+    if ($artifactsXml -notlike "*classifier='osgi.bundle' id='com.aihelper'*") {
+        throw "El archivo $artifactJar no contiene el artefacto esperado para com.aihelper"
+    }
+
+    if ($artifactsXml -notlike "*classifier='org.eclipse.update.feature' id='com.aihelper.feature'*") {
+        throw "El archivo $artifactJar no contiene el artefacto esperado para com.aihelper.feature"
     }
 
     Write-Output ("OK metadata: " + $artifactJar)
+}
+
+$contentJars = @(
+    (Join-Path $RepoRoot "release\content.jar"),
+    (Join-Path $RepoRoot "docs\content.jar")
+)
+
+foreach ($contentJar in $contentJars) {
+    if (-not (Test-Path $contentJar)) {
+        throw "Falta el metadata JAR: $contentJar"
+    }
+
+    $contentXml = Get-ZipEntryText -ZipPath $contentJar -EntryName "content.xml"
+    if (-not $contentXml) {
+        throw "No encontre content.xml dentro de $contentJar"
+    }
+
+    if ($contentXml -notlike "*com.aihelper.feature.feature.group*") {
+        throw "El archivo $contentJar no contiene la unidad esperada com.aihelper.feature.feature.group"
+    }
+
+    Write-Output ("OK metadata: " + $contentJar)
 }
 
 Write-Output "Verificacion completada correctamente."
