@@ -9,3 +9,4 @@ AI Helper Chat/.classpath
 /.sonarlint
 /bin
 /release
+/build-temp

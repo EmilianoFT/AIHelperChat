@@ -28,4 +28,11 @@ public final class PreferenceConstants {
     public static final String LIST_MAX_DEPTH = "chat.list.max.depth";
     public static final String LIST_MAX_LIMIT = "chat.list.max.limit";
 
+    public static final String TEAM_DEV_PROVIDER = "team.dev.provider";
+    public static final String TEAM_DEV_MODEL = "team.dev.model";
+    public static final String TEAM_ARQ_PROVIDER = "team.arq.provider";
+    public static final String TEAM_ARQ_MODEL = "team.arq.model";
+    public static final String TEAM_AUDIT_PROVIDER = "team.audit.provider";
+    public static final String TEAM_AUDIT_MODEL = "team.audit.model";
+
 }

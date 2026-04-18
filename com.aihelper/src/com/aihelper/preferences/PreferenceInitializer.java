@@ -42,5 +42,12 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(PreferenceConstants.LIST_MAX_DEPTH, 5);
         store.setDefault(PreferenceConstants.LIST_MAX_LIMIT, 500);
 
+        store.setDefault(PreferenceConstants.TEAM_DEV_PROVIDER, "");
+        store.setDefault(PreferenceConstants.TEAM_DEV_MODEL, "");
+        store.setDefault(PreferenceConstants.TEAM_ARQ_PROVIDER, "");
+        store.setDefault(PreferenceConstants.TEAM_ARQ_MODEL, "");
+        store.setDefault(PreferenceConstants.TEAM_AUDIT_PROVIDER, "");
+        store.setDefault(PreferenceConstants.TEAM_AUDIT_MODEL, "");
+
     }
 }

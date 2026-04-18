@@ -29,11 +29,14 @@ public class OllamaChatService implements AiChatService {
             Runnable onComplete) {
 
         try {
-            String generateUrl = endpoint("/api/generate");
+                        String chatUrl = endpoint("/api/chat");
             String payload = """
             {
               "model": "%s",
-              "prompt": "%s\\n\\n%s",
+                            "messages": [
+                                {"role": "system", "content": "%s"},
+                                {"role": "user", "content": "%s"}
+                            ],
               "stream": true
             }
             """.formatted(
@@ -43,7 +46,7 @@ public class OllamaChatService implements AiChatService {
             );
 
                 HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(generateUrl))
+                    .uri(URI.create(chatUrl))
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
@@ -60,9 +63,8 @@ public class OllamaChatService implements AiChatService {
 
                         try (Stream<String> lines = response.body()) {
                             lines.forEach(line -> {
-                                if (line.contains("\"response\"")) {
-                                    String chunk = JsonHelper.extractJsonValue(line, "response");
-                                    if (chunk != null) {
+                                if (line.contains("\"message\"")) {
+                                    for (String chunk : JsonHelper.extractAllValues(line, "content")) {
                                         onChunk.accept(chunk);
                                     }
                                 }

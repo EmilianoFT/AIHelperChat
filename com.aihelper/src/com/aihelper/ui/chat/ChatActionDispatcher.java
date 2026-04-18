@@ -16,13 +16,15 @@ import com.aihelper.workspace.WorkspaceService;
  */
 public class ChatActionDispatcher {
 
+    private static final int ACTION_RESULT_CHAR_LIMIT = 4000;
+
     private static final Pattern READ_FILE_KV = Pattern.compile(
-        "project=([^\\s\"]+|\"[^\"]+\")\\s+path=([^\\s\"]+|\"[^\"]+\")",
+        "\\[ACTION:READ_FILE\\]\\s*project=([^\\s\"]+|\"[^\"]+\")\\s+path=([^\\s\"]+|\"[^\"]+\")",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern READ_FILE_JSON = Pattern.compile(
-        "\\{[^}]*\"project\"\\s*:\\s*\"([^\"]+)\"[^}]*\"path\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}",
+        "\\[ACTION:READ_FILE\\]\\s*\\{[^}]*\"project\"\\s*:\\s*\"([^\"]+)\"[^}]*\"path\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -42,7 +44,7 @@ public class ChatActionDispatcher {
     );
 
     private static final Pattern READ_FILE_RANGE_JSON = Pattern.compile(
-        "\\{[^}]*\"project\"\\s*:\\s*\"([^\"]+)\"[^}]*\"path\"\\s*:\\s*\"([^\"]+)\"[^}]*\"start\"\\s*:\\s*(\\d+)\s*[^}]*\"end\"\\s*:\\s*(\\d+)\s*[^}]*\\}",
+        "\\[ACTION:READ_FILE_RANGE\\]\\s*\\{[^}]*\"project\"\\s*:\\s*\"([^\"]+)\"[^}]*\"path\"\\s*:\\s*\"([^\"]+)\"[^}]*\"start\"\\s*:\\s*(\\d+)\\s*[^}]*\"end\"\\s*:\\s*(\\d+)\\s*[^}]*\\}",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -86,7 +88,7 @@ public class ChatActionDispatcher {
 
     private String nextStepMessage(String actionResult) {
         return actionResult +
-            "\n\nPuedes decidir si necesitas ejecutar más acciones (envía otro [ACTION:...] si es necesario) o si ya tienes suficiente información para contestar al usuario. Si necesitas más datos, pide la acción correspondiente. Si ya puedes responder, hazlo directamente al usuario.";
+            "\n\nUsa este resultado. Si todavía necesitas información, responde con exactamente una acción. Si ya puedes responder, contesta al usuario directamente y no expliques las acciones.";
     }
 
     private boolean handleReadFile(String text) {
@@ -111,11 +113,11 @@ public class ChatActionDispatcher {
 
         String content = workspaceService.readFile(project, path);
         if (content == null || content.isBlank()) {
-            automatedSender.accept(nextStepMessage("[SYSTEM] Archivo no encontrado o vacío: " + path));
+            automatedSender.accept(nextStepMessage(buildMissingResult("READ_FILE", project, path, "Archivo no encontrado o vacío")));
             return true;
         }
 
-        automatedSender.accept(nextStepMessage("Contenido solicitado:\n" + content));
+        automatedSender.accept(nextStepMessage(buildFileResult("READ_FILE", project, path, null, null, content)));
         return true;
     }
 
@@ -171,10 +173,10 @@ public class ChatActionDispatcher {
         int end = parseOrDefault(endStr, start + 200);
         String content = workspaceService.readFileRange(project, path, start, end);
         if (content == null || content.isBlank()) {
-            automatedSender.accept(nextStepMessage("[SYSTEM] Rango vacío o archivo no encontrado: " + path));
+            automatedSender.accept(nextStepMessage(buildMissingResult("READ_FILE_RANGE", project, path, "Rango vacío o archivo no encontrado")));
             return true;
         }
-        automatedSender.accept(nextStepMessage("Contenido solicitado (" + start + "-" + end + "):\n" + content));
+        automatedSender.accept(nextStepMessage(buildFileResult("READ_FILE_RANGE", project, path, start, end, content)));
         return true;
     }
 
@@ -255,6 +257,67 @@ public class ChatActionDispatcher {
             return trimmed.substring(1, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    private String buildMissingResult(String action, String project, String path, String reason) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[ACTION_RESULT:").append(action).append("]\n")
+          .append("status=ERROR\n")
+          .append("project=").append(project).append("\n")
+          .append("path=").append(path).append("\n")
+          .append("message=").append(reason).append("\n")
+          .append("[/ACTION_RESULT]");
+        return sb.toString();
+    }
+
+    private String buildFileResult(String action, String project, String path, Integer start, Integer end, String content) {
+        String language = inferLanguage(path);
+                boolean truncated = content != null && content.length() > ACTION_RESULT_CHAR_LIMIT;
+                String normalized = trimActionContent(content);
+        StringBuilder sb = new StringBuilder();
+        sb.append("[ACTION_RESULT:").append(action).append("]\n")
+          .append("status=OK\n")
+          .append("project=").append(project).append("\n")
+          .append("path=").append(path).append("\n");
+        if (start != null && end != null) {
+            sb.append("range=").append(start).append("-").append(end).append("\n");
+        }
+                sb.append("truncated=").append(truncated).append("\n");
+        sb.append("language=").append(language).append("\n")
+          .append("content:\n")
+          .append("```").append(language).append("\n")
+          .append(normalized);
+        if (!normalized.endsWith("\n")) {
+            sb.append("\n");
+        }
+                sb.append("```\n");
+                if (truncated) {
+                        sb.append("note=Use READ_FILE_RANGE if you need a specific section of this file.\n");
+                }
+                sb
+          .append("[/ACTION_RESULT]");
+        return sb.toString();
+    }
+
+    private String trimActionContent(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        if (content.length() <= ACTION_RESULT_CHAR_LIMIT) {
+            return content;
+        }
+        return content.substring(0, ACTION_RESULT_CHAR_LIMIT) + "\n... [truncated]";
+    }
+
+    private String inferLanguage(String path) {
+        if (path == null || path.isBlank()) {
+            return "text";
+        }
+        int idx = path.lastIndexOf('.');
+        if (idx < 0 || idx == path.length() - 1) {
+            return "text";
+        }
+        return path.substring(idx + 1).toLowerCase();
     }
 
     @FunctionalInterface

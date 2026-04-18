@@ -6,6 +6,7 @@ import java.net.URL;
 import java.net.URI;
 import java.io.InputStreamReader;
 import java.io.BufferedReader;
+import java.util.LinkedHashSet;
 
 import com.aihelper.ai.util.JsonHelper;
 import com.aihelper.preferences.CredentialsService;
@@ -37,10 +38,17 @@ public class OpenAiChatService extends OpenAiCompatibleChatService {
                 CredentialsService.getOpenAiDefaultModel(),
                 "gpt-4o-mini",
                 "gpt-4.1-mini",
-                "gpt-4o"
+                "gpt-4o",
+                "gpt-3.5-turbo"
         );
         try {
-            URL url = URI.create(apiUrl() + "/v1/models").toURL();
+            String base = apiUrl();
+            if (base == null || base.isBlank()) {
+                return fallback;
+            }
+            String normalized = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+            String modelsPath = normalized.endsWith("/v1") ? "/models" : "/v1/models";
+            URL url = URI.create(normalized + modelsPath).toURL();
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey());
@@ -57,7 +65,19 @@ public class OpenAiChatService extends OpenAiCompatibleChatService {
             // Extraer los ids de los modelos usando JsonHelper
             List<String> models = JsonHelper.extractArrayField(json, "id");
             if (models.isEmpty()) return fallback;
-            return models;
+
+            LinkedHashSet<String> ordered = new LinkedHashSet<>();
+            for (String preferred : fallback) {
+                if (preferred != null && !preferred.isBlank()) {
+                    ordered.add(preferred);
+                }
+            }
+            for (String model : models) {
+                if (model != null && !model.isBlank()) {
+                    ordered.add(model);
+                }
+            }
+            return List.copyOf(ordered);
         } catch (Exception e) {
             return fallback;
         }

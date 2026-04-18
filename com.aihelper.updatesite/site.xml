@@ -4,9 +4,9 @@
       <description>AI Helper plugins</description>
    </category-def>
    <feature
-      url="features/com.aihelper.feature_1.0.1.jar"
+      url="features/com.aihelper.feature_1.0.2.jar"
       id="com.aihelper.feature"
-      version="1.0.1">
+      version="1.0.2">
       <category name="AI Helper"/>
    </feature>
 </site>

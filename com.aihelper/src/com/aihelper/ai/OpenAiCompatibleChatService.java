@@ -34,6 +34,7 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
         return effective == null ? List.of() : List.of(effective);
     }
     protected String completionsPath() { return "/chat/completions"; }
+    protected int maxCompletionTokens() { return 512; }
 
     @Override
     public Runnable sendMessageStreaming(
@@ -65,10 +66,12 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
         }
 
                 try {
+                        int maxTokens = Math.max(64, maxCompletionTokens());
                         String payload = """
                         {
                             "model": "%s",
                             "stream": true,
+                            "max_tokens": %d,
                             "messages": [
                                 {"role":"system","content":"%s"},
                                 {"role":"user","content":"%s"}
@@ -76,6 +79,7 @@ public abstract class OpenAiCompatibleChatService implements AiChatService {
                         }
                         """.formatted(
                                         chatModel,
+                                        maxTokens,
                                         JsonHelper.escape(context),
                                         JsonHelper.escape(prompt)
                         );

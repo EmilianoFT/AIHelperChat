@@ -99,9 +99,18 @@ public class WorkspaceService {
             return;
         }
 
-        if (resource instanceof IProject) {
-            for (IResource r : ((IProject) resource).members()) {
-                listTree(r, sb, depth + 1, maxDepth, counter, maxFiles);
+        if (resource instanceof IContainer) {
+            if (!(resource instanceof IProject)) {
+                indent(sb, depth);
+                sb.append(resource.getProjectRelativePath()).append("/\n");
+                counter[0]++;
+                if (counter[0] >= maxFiles) return;
+            }
+
+            if (depth < maxDepth) {
+                for (IResource r : ((IContainer) resource).members()) {
+                    listTree(r, sb, depth + 1, maxDepth, counter, maxFiles);
+                }
             }
         }
     }
@@ -375,10 +384,19 @@ public class WorkspaceService {
     private void listFilesRecursiveHelper(IResource resource, StringBuilder sb, String prefix) throws CoreException {
         if (resource.getType() == IResource.FILE) {
             sb.append(prefix).append(resource.getName()).append("\n");
-        } else if (resource instanceof IContainer) {
+            return;
+        }
+
+        if (resource instanceof IContainer) {
             IContainer container = (IContainer) resource;
+            String nextPrefix = prefix;
+            if (!(resource instanceof IProject)) {
+                nextPrefix = prefix.isEmpty()
+                        ? resource.getName() + "/"
+                        : prefix + resource.getName() + "/";
+            }
             for (IResource r : container.members()) {
-                listFilesRecursiveHelper(r, sb, prefix + (prefix.isEmpty() ? "" : "/"));
+                listFilesRecursiveHelper(r, sb, nextPrefix);
             }
         }
     }

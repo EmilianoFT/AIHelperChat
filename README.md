@@ -10,7 +10,7 @@ AI Helper Chat es un complemento **gratuito y de código abierto** para Eclipse 
 
 ## Requisitos
 - Eclipse 2023-12 o superior con SWT.
-- JDK 17+ (también funciona con 21).
+- JDK 17 o superior.
 - API keys personales para los proveedores que quieras usar.
 
 ## Instalación rápida
@@ -38,6 +38,18 @@ Workspace/
 2. **Genera el update site**: abre el proyecto `com.aihelper.updatesite`, edita `site.xml` para verificar la URL del feature y usa `Export > Deployable features` o `Build All` dentro del editor para producir el repositorio p2 (`features/` + `plugins/`).
 3. **Verifica localmente**: apunta un Eclipse limpio a la carpeta del update site con `Help > Install New Software... > Add... > Local...` para confirmar que la instalación funciona.
 4. **Publica en Marketplace**: sube el contenido del update site generado (incluido `site.xml`) al hosting que prefieras y referencia esa URL en el formulario de Marketplace.
+
+## Scripts útiles
+La carpeta `scripts/` incluye automatizaciones para repetir el flujo local sin copiar comandos largos:
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Rebuild-Plugin.ps1`
+	- recompila `com.aihelper`, reconstruye los JARs en `release/` y sincroniza `docs/`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Verify-PluginArtifacts.ps1`
+	- valida que los JARs publicados contengan `plugin.xml`, `ChatView.class`, `LocalWorkspaceRouter.class` y que `artifacts.jar` mantenga los mappings `${repoUrl}` correctos.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Search-JarText.ps1 -SearchText max_tokens,gpt-4o-mini`
+	- busca cadenas ASCII dentro de clases compiladas para inspeccionar constantes incluidas en el binario.
+
+Si tu instalacion de Eclipse no esta en `C:\Users\Emiliano\eclipse\plugins\*`, pasa `-EclipsePluginsPath` o define `AIHELPER_ECLIPSE_PLUGINS_PATH` antes de ejecutar `Rebuild-Plugin.ps1`.
 
 ## Configuración de proveedores
 Cada proveedor se inicializa leyendo su variable de entorno correspondiente. Si no está definida, la vista mostrará un recordatorio al seleccionarlo. De forma avanzada puedes editar el archivo `.metadata/.plugins/org.eclipse.core.runtime/.settings/com.aihelper.prefs` del workspace runtime para fijar modelos/base URLs personalizados.

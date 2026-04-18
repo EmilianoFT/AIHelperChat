@@ -103,5 +103,32 @@ public class CredentialsPreferencePage extends FieldEditorPreferencePage impleme
                 getFieldEditorParent());
         limit.setValidRange(10, 1000);
         addField(limit);
+
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_DEV_PROVIDER,
+                "Team - Dev Senior proveedor",
+                getFieldEditorParent()));
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_DEV_MODEL,
+                "Team - Dev Senior modelo",
+                getFieldEditorParent()));
+
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_ARQ_PROVIDER,
+                "Team - Arquitecto Senior proveedor",
+                getFieldEditorParent()));
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_ARQ_MODEL,
+                "Team - Arquitecto Senior modelo",
+                getFieldEditorParent()));
+
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_AUDIT_PROVIDER,
+                "Team - Auditor Senior proveedor",
+                getFieldEditorParent()));
+        addField(new StringFieldEditor(
+                PreferenceConstants.TEAM_AUDIT_MODEL,
+                "Team - Auditor Senior modelo",
+                getFieldEditorParent()));
     }
 }

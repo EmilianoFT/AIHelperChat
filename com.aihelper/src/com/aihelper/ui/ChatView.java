@@ -1,8 +1,11 @@
 package com.aihelper.ui;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,6 +41,9 @@ import com.aihelper.workspace.WorkspaceService;
 public class ChatView extends ViewPart {
 
     public static final String ID = "com.aihelper.ui.chatView";
+    private static final String ACTION_RESULT_PREFIX = "[ACTION_RESULT:";
+    private static final String ACTION_FOLLOW_UP_PROMPT =
+            "Use the latest ACTION_RESULT from the conversation history. If more data is needed, output exactly one action line. Otherwise answer the user directly.";
 
     // ===============================
     // UI
@@ -46,16 +52,24 @@ public class ChatView extends ViewPart {
     private Text input;
     private Combo providerCombo;
     private Combo modelCombo;
+    private Combo viewCombo;
     private Text statusText;
     private Text progressText;
     private Button spinnerButton;
+    private Button stopButton;
+    private Button teamModeButton;
     private Button errorsButton;
     private final WorkspaceService workspaceService = new WorkspaceService();
     private final DiffService diffService = new DiffService();
-    private ChatController controller;
+    private final LocalWorkspaceRouter localWorkspaceRouter = new LocalWorkspaceRouter(workspaceService);
     private AiChatService aiService;
     private ChatContextBuilder contextBuilder;
     private ChatActionDispatcher actionDispatcher;
+    private final ProfileConfigService profileConfigService = new ProfileConfigService();
+    private final Map<ChatProfile, ChatSession> sessions = new EnumMap<>(ChatProfile.class);
+    private final Map<ChatProfile, List<ChatMessage>> viewMessages = new EnumMap<>(ChatProfile.class);
+    private final Map<ChatProfile, Integer> consumedTokens = new EnumMap<>(ChatProfile.class);
+    private final List<ChatMessage> viewAllMessages = new ArrayList<>();
 
     // ===============================
     // State
@@ -65,7 +79,6 @@ public class ChatView extends ViewPart {
     private Runnable currentCancel;
     private String lastCodeBlock = "";
     private int aiMessageStart = -1;
-    private StringBuilder aiResponseBuffer = new StringBuilder();
 
     // ===============================
     // Styling
@@ -88,6 +101,10 @@ public class ChatView extends ViewPart {
     public void createPartControl(Composite parent) {
         parent.setLayout(new GridLayout(1, false));
 
+        for (ChatProfile profile : ChatProfile.values()) {
+            viewMessages.put(profile, new ArrayList<>());
+        }
+
         initColors();
         createToolbar(parent);
         createChatArea(parent);
@@ -104,7 +121,7 @@ public class ChatView extends ViewPart {
 
         contextBuilder = new ChatContextBuilder(workspaceService);
         // Instanciar el dispatcher para acciones automáticas
-        actionDispatcher = new ChatActionDispatcher(workspaceService, (msg) -> appendAutomatedUser(msg, true));
+        actionDispatcher = new ChatActionDispatcher(workspaceService, this::continueAutomatedConversation);
 
         loadHistory();
         initProvider();
@@ -116,7 +133,7 @@ public class ChatView extends ViewPart {
     private void createToolbar(Composite parent) {
         Composite bar = new Composite(parent, SWT.NONE);
         bar.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        bar.setLayout(new GridLayout(9, false));
+        bar.setLayout(new GridLayout(10, false));
 
         // Logo pequeño a la izquierda, imagen realmente 24x24
         Label logoLabel = new Label(bar, SWT.NONE);
@@ -137,6 +154,12 @@ public class ChatView extends ViewPart {
         providerCombo.setToolTipText("Selecciona el proveedor de IA");
         providerCombo.addListener(SWT.Selection, e -> switchProvider());
 
+        teamModeButton = new Button(bar, SWT.CHECK);
+        teamModeButton.setText("Team mode");
+        teamModeButton.setToolTipText("Activa 4 chats paralelos (Dev, Arquitecto, Auditor, Team Leader)");
+        teamModeButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        teamModeButton.addListener(SWT.Selection, e -> refreshTotalTokenCount());
+
         modelCombo = new Combo(bar, SWT.READ_ONLY);
         modelCombo.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         modelCombo.setToolTipText("Selecciona el modelo de IA");
@@ -145,6 +168,13 @@ public class ChatView extends ViewPart {
             statusInfo("Modelo activo: " + modelCombo.getText());
         });
 
+        viewCombo = new Combo(bar, SWT.READ_ONLY);
+        viewCombo.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        viewCombo.setToolTipText("Selecciona el chat a visualizar");
+        viewCombo.setItems("Todos", "Team Leader", "Dev Senior", "Arquitecto Senior", "Auditor Senior");
+        viewCombo.select(0);
+        viewCombo.addListener(SWT.Selection, e -> renderView());
+
         Button clear = new Button(bar, SWT.PUSH);
         clear.setText("Clear");
         clear.setToolTipText("Limpiar chat");
@@ -152,6 +182,7 @@ public class ChatView extends ViewPart {
         clear.addListener(SWT.Selection, e -> {
             chatArea.setText("");
             chatHistory.clear();
+            clearHistories();
             statusInfo("Historial limpiado");
         });
 
@@ -161,7 +192,7 @@ public class ChatView extends ViewPart {
         prefs.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
         prefs.addListener(SWT.Selection, e -> openPreferences());
 
-        Button stopButton = new Button(bar, SWT.PUSH);
+        stopButton = new Button(bar, SWT.PUSH);
         stopButton.setText("Stop");
         stopButton.setToolTipText("Cancelar respuesta actual");
         stopButton.setEnabled(false);
@@ -184,7 +215,7 @@ public class ChatView extends ViewPart {
     public void openPreferences() {
         PreferenceDialog dialog = PreferencesUtil.createPreferenceDialogOn(
             getSite().getShell(),
-            "com.aihelper.preferences.main",
+            "com.aihelper.preferences",
             null,
             null
         );
@@ -247,8 +278,9 @@ public class ChatView extends ViewPart {
         statusText.setText("[INFO] Ready");
 
         progressText = new Text(bar, SWT.READ_ONLY | SWT.BORDER);
-        progressText.setLayoutData(new GridData(120, SWT.DEFAULT));
-        progressText.setText("Tokens: 0");
+        progressText.setLayoutData(new GridData(180, SWT.DEFAULT));
+        progressText.setText("Tokens total: 0");
+        progressText.setToolTipText("Estimación acumulada de tokens consumidos por el chat actual.");
 
         spinnerButton = new Button(bar, SWT.PUSH);
         spinnerButton.setText("⟳");
@@ -283,6 +315,12 @@ public class ChatView extends ViewPart {
         CompletableFuture
             .supplyAsync(aiService::listModels)
             .thenAccept(models -> Display.getDefault().asyncExec(() -> {
+                if (models == null || models.isEmpty()) {
+                    modelCombo.setItems(new String[0]);
+                    modelCombo.deselectAll();
+                    statusInfo("No se encontraron modelos para el proveedor seleccionado");
+                    return;
+                }
                 modelCombo.setItems(models.toArray(String[]::new));
                 modelCombo.select(0);
                 aiService.setModel(models.get(0));
@@ -299,44 +337,169 @@ public class ChatView extends ViewPart {
     private void sendInternal(String override) {
         String msg = override != null ? override : input.getText().trim();
         if (msg.isEmpty()) return;
+        final String projectName = workspaceService.getActiveProjectName();
 
         input.setText("");
         appendUser(msg);
         chatHistory.add(new ChatMessage("user", msg));
+        recordUserMessageForViews(msg);
 
-        appendAIHeader();
+        if (tryHandleLocalWorkspaceRequest(msg, projectName)) {
+            return;
+        }
+
+        if (isTeamMode()) {
+            sendTeamMessage(msg, projectName);
+        } else {
+            sendSingleMessage(msg, projectName);
+        }
+    }
+
+    private boolean tryHandleLocalWorkspaceRequest(String msg, String projectName) {
+        String localResponse = localWorkspaceRouter.tryHandle(msg, projectName);
+        if (localResponse == null || localResponse.isBlank()) {
+            return false;
+        }
+
+        appendLocalExchangeToSessions(msg, localResponse, projectName);
+        recordLocalAssistantMessageForViews(localResponse, isTeamMode());
+        appendAIResponse(localResponse, "Local");
+        chatHistory.add(new ChatMessage("assistant", localResponse));
+        statusInfo("Respuesta local del workspace");
+        currentCancel = null;
+        return true;
+    }
+
+    private void appendLocalExchangeToSessions(String userMessage, String assistantMessage, String projectName) {
+        if (isTeamMode()) {
+            for (ChatProfile profile : ChatProfile.values()) {
+                ChatSession session = resolveSession(profile, providerCombo.getText(), modelCombo.getText(), projectName);
+                session.appendMessage("user", userMessage);
+                session.appendMessage("assistant", assistantMessage);
+            }
+            return;
+        }
+
+        ChatSession leader = resolveSession(ChatProfile.TEAM_LEADER, providerCombo.getText(), modelCombo.getText(), projectName);
+        leader.appendMessage("user", userMessage);
+        leader.appendMessage("assistant", assistantMessage);
+    }
+
+    private void sendSingleMessage(String msg, String projectName) {
+        sendSingleMessage(msg, projectName, true);
+    }
+
+    private void sendSingleMessage(String msg, String projectName, boolean appendHeader) {
+        if (appendHeader) {
+            appendAIHeader();
+        }
         setStreamingState(true);
-        aiResponseBuffer.setLength(0); // Limpiar buffer de respuesta IA
-        aiService.sendMessageStreaming(
+
+        ChatSession session = resolveSession(
+                ChatProfile.TEAM_LEADER,
+                providerCombo.getText(),
+                modelCombo.getText(),
+                projectName
+        );
+        int requestTokens = estimateRequestTokens(session, msg);
+
+        currentCancel = session.sendMessageStreaming(
             msg,
-            contextBuilder.buildContext(chatHistory),
-            chunk -> Display.getDefault().asyncExec(() -> {
-                aiResponseBuffer.append(chunk);
-                updateProgressTokens(chunk != null ? chunk.length() : 0);
-            }),
+            chunk -> Display.getDefault().asyncExec(() -> addConsumedTokens(ChatProfile.TEAM_LEADER, estimateTokens(chunk))),
             err -> Display.getDefault().asyncExec(() -> {
                 appendSystem(err.getMessage());
                 errorLog.add(err.getMessage());
                 updateErrorCount();
                 setStreamingState(false);
+                currentCancel = null;
             }),
-            () -> Display.getDefault().asyncExec(() -> {
+            aiResponse -> Display.getDefault().asyncExec(() -> {
                 setStreamingState(false);
-                // Al finalizar, mostrar la respuesta completa de la IA en su globo
-                String aiResponse = aiResponseBuffer.toString();
-                if (!aiResponse.isEmpty()) {
-                    // Si es solo un action, no mostrar en chatArea pero sí agregar al histórico
+                currentCancel = null;
+                if (aiResponse != null && !aiResponse.isEmpty()) {
                     if (isOnlyAction(aiResponse)) {
                         chatHistory.add(new ChatMessage("assistant", aiResponse));
                         actionDispatcher.handle(aiResponse);
                     } else {
-                        appendAIResponse(aiResponse);
+                        recordAssistantMessageForViews(ChatProfile.TEAM_LEADER, "AI", aiResponse);
+                        if (shouldRenderForProfile(ChatProfile.TEAM_LEADER)) {
+                            appendAIResponse(aiResponse);
+                        } else {
+                            renderView();
+                        }
                         chatHistory.add(new ChatMessage("assistant", aiResponse));
                         actionDispatcher.handle(aiResponse);
                     }
                 }
             })
         );
+        addConsumedTokens(ChatProfile.TEAM_LEADER, requestTokens);
+    }
+
+    private void sendTeamMessage(String msg, String projectName) {
+        setStreamingState(true);
+        List<ChatProfile> profiles = List.of(
+                ChatProfile.DEV_SENIOR,
+                ChatProfile.ARQ_SENIOR,
+                ChatProfile.AUDITOR_SENIOR,
+                ChatProfile.TEAM_LEADER
+        );
+
+        AtomicInteger remaining = new AtomicInteger(profiles.size());
+
+        currentCancel = () -> {
+            for (ChatProfile profile : profiles) {
+                ChatSession session = sessions.get(profile);
+                if (session != null) {
+                    session.cancel();
+                }
+            }
+        };
+
+        for (ChatProfile profile : profiles) {
+            String fallbackProvider = providerCombo.getText();
+            String fallbackModel = modelCombo.getText();
+
+            ChatSession session = resolveSession(profile, fallbackProvider, fallbackModel, projectName);
+            int requestTokens = estimateRequestTokens(session, msg);
+
+            session.sendMessageStreaming(
+                msg,
+                chunk -> Display.getDefault().asyncExec(() -> addConsumedTokens(profile, estimateTokens(chunk))),
+                err -> Display.getDefault().asyncExec(() -> {
+                    appendSystem("[" + profile.getDisplayName() + "] " + err.getMessage());
+                    errorLog.add(err.getMessage());
+                    updateErrorCount();
+                    if (remaining.decrementAndGet() == 0) {
+                        setStreamingState(false);
+                        currentCancel = null;
+                    }
+                }),
+                aiResponse -> Display.getDefault().asyncExec(() -> {
+                    if (aiResponse != null && !aiResponse.isEmpty()) {
+                        if (profile == ChatProfile.TEAM_LEADER && isOnlyAction(aiResponse)) {
+                            actionDispatcher.handle(aiResponse);
+                        } else {
+                            recordAssistantMessageForViews(profile, profile.getDisplayName(), aiResponse);
+                            if (shouldRenderForProfile(profile)) {
+                                appendAIResponse(aiResponse, profile.getDisplayName());
+                            } else {
+                                renderView();
+                            }
+                            if (profile == ChatProfile.TEAM_LEADER) {
+                                actionDispatcher.handle(aiResponse);
+                            }
+                        }
+                    }
+                    if (remaining.decrementAndGet() == 0) {
+                        setStreamingState(false);
+                        currentCancel = null;
+                    }
+                })
+            );
+
+            addConsumedTokens(profile, requestTokens);
+        }
     }
 
     // ===============================
@@ -379,6 +542,10 @@ public class ChatView extends ViewPart {
     }
 
     private void appendAIResponse(String aiResponse) {
+        appendAIResponse(aiResponse, "AI");
+    }
+
+    private void appendAIResponse(String aiResponse, String label) {
         // Filtrar action e instrucciones internas para el modelo
         String userVisible = extractUserVisible(aiResponse);
         if (userVisible.isBlank()) {
@@ -388,7 +555,7 @@ public class ChatView extends ViewPart {
         // Línea en blanco antes del globo (solo uno)
         chatArea.append("\n");
         int start = chatArea.getCharCount();
-        String aiLabel = "AI:";
+        String aiLabel = (label == null || label.isBlank()) ? "AI:" : "AI (" + label + "):";
         // Insertar icono Copilot/AI antes del label
         if (copilotIcon != null) {
             chatArea.append(" ");
@@ -605,11 +772,16 @@ public class ChatView extends ViewPart {
 
     private void loadHistory() {
         String project = workspaceService.getActiveProjectName();
-        if (controller != null) {
-            for (ChatMessage msg : controller.loadHistory(project)) {
-                appendMessage(msg.getRole(), msg.getContent());
-            }
+        ChatSession leader = resolveSession(ChatProfile.TEAM_LEADER, providerCombo.getText(), modelCombo.getText(), project);
+        leader.loadHistory();
+        chatHistory.clear();
+        chatHistory.addAll(leader.getHistory());
+        resetViewMessages();
+        for (ChatMessage msg : leader.getHistory()) {
+            recordLoadedMessageForViews(ChatProfile.TEAM_LEADER, msg);
         }
+        renderView();
+        refreshTotalTokenCount();
     }
     
     private void showErrorLog() {
@@ -617,8 +789,12 @@ public class ChatView extends ViewPart {
     }
 
     private void cancelStreaming() {
-        if (currentCancel != null) currentCancel.run();
+        if (currentCancel != null) {
+            currentCancel.run();
+        }
+        currentCancel = null;
         statusInfo("Respuesta cancelada");
+        setStreamingState(false);
     }
 
     private void initColors() {
@@ -656,16 +832,70 @@ public class ChatView extends ViewPart {
         });
     }
 
-    private void updateProgressTokens(int tokens) {
-        if (progressText != null && !progressText.isDisposed()) {
-            progressText.setText("Tokens: " + tokens);
+    private void addConsumedTokens(ChatProfile profile, int tokens) {
+        if (profile == null || tokens <= 0) {
+            return;
         }
+        consumedTokens.merge(profile, tokens, Integer::sum);
+        refreshTotalTokenCount();
+    }
+
+    private void clearConsumedTokens(ChatProfile profile) {
+        if (profile == null) {
+            return;
+        }
+        consumedTokens.remove(profile);
+    }
+
+    private void refreshTotalTokenCount() {
+        if (progressText != null && !progressText.isDisposed()) {
+            progressText.setText("Tokens total: " + scopedConsumedTokens());
+        }
+    }
+
+    private int scopedConsumedTokens() {
+        if (isTeamMode()) {
+            int total = 0;
+            for (ChatProfile profile : ChatProfile.values()) {
+                total += consumedTokens.getOrDefault(profile, 0);
+            }
+            return total;
+        }
+        return consumedTokens.getOrDefault(ChatProfile.TEAM_LEADER, 0);
+    }
+
+    private int estimateRequestTokens(ChatSession session, String prompt) {
+        if (contextBuilder == null || session == null) {
+            return estimateTokens(prompt);
+        }
+
+        List<ChatMessage> requestHistory = new ArrayList<>(session.getHistory());
+        String effectivePrompt = prompt;
+
+        if (prompt != null && prompt.startsWith(ACTION_RESULT_PREFIX)) {
+            requestHistory.add(new ChatMessage("tool", prompt));
+            effectivePrompt = ACTION_FOLLOW_UP_PROMPT;
+        }
+
+        String context = contextBuilder.buildContext(requestHistory);
+        return estimateTokens(context) + estimateTokens(effectivePrompt);
+    }
+
+    private int estimateTokens(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        int codePoints = text.codePointCount(0, text.length());
+        return Math.max(1, (codePoints + 3) / 4);
     }
 
     private void setStreamingState(boolean streaming) {
         if (spinnerButton != null && !spinnerButton.isDisposed()) {
             spinnerButton.setEnabled(streaming);
             spinnerButton.setText(streaming ? "⟳ (ON)" : "⟳");
+        }
+        if (stopButton != null && !stopButton.isDisposed()) {
+            stopButton.setEnabled(streaming);
         }
     }
 
@@ -693,15 +923,182 @@ public class ChatView extends ViewPart {
         super.dispose();
     }
 
-    private void appendAutomatedUser(String msg, boolean silent) {
-        // Si es silencioso, solo guardar en historial, no mostrar en chatArea
-        if (silent) {
-            chatHistory.add(new ChatMessage("user", msg));
-            // No mostrar en chatArea
+    private void continueAutomatedConversation(String msg) {
+        if (msg == null || msg.isBlank()) {
             return;
         }
-        appendUser(msg);
-        chatHistory.add(new ChatMessage("user", msg));
+        sendSingleMessage(msg, workspaceService.getActiveProjectName(), false);
+    }
+
+    private ChatSession resolveSession(ChatProfile profile, String fallbackProvider, String fallbackModel, String projectName) {
+        ChatSession session = sessions.computeIfAbsent(profile, p ->
+                new ChatSession(p, new ChatController(new ChatHistoryStore(), workspaceService), contextBuilder));
+
+        String provider = (profile == ChatProfile.TEAM_LEADER)
+                ? fallbackProvider
+                : profileConfigService.getProvider(profile);
+
+        if (provider == null || provider.isBlank()) {
+            provider = fallbackProvider;
+        }
+
+        AiChatService service = createService(provider);
+        if (service != null) {
+            String model = (profile == ChatProfile.TEAM_LEADER)
+                    ? fallbackModel
+                    : profileConfigService.getModel(profile);
+            if (model == null || model.isBlank()) {
+                model = fallbackModel;
+            }
+            if (model != null && !model.isBlank()) {
+                service.setModel(model);
+            }
+            session.setAiService(service);
+        }
+
+        session.setProjectKey(buildProjectKey(projectName, profile));
+        return session;
+    }
+
+    private AiChatService createService(String provider) {
+        String name = provider == null ? "" : provider.trim();
+        return switch (name) {
+            case "OpenAI" -> new OpenAiChatService();
+            case "Gemini" -> new GeminiChatService();
+            case "Qwen" -> new QwenChatService();
+            case "DeepSeek" -> new DeepSeekChatService();
+            default -> new OllamaChatService();
+        };
+    }
+
+    private String buildProjectKey(String projectName, ChatProfile profile) {
+        String base = projectName == null ? "" : projectName.trim();
+        if (profile == ChatProfile.TEAM_LEADER || base.isBlank()) {
+            return base;
+        }
+        return base + "::" + profile.name();
+    }
+
+    private boolean isTeamMode() {
+        return teamModeButton != null && !teamModeButton.isDisposed() && teamModeButton.getSelection();
+    }
+
+    private void resetViewMessages() {
+        viewAllMessages.clear();
+        for (ChatProfile profile : ChatProfile.values()) {
+            List<ChatMessage> list = viewMessages.get(profile);
+            if (list != null) {
+                list.clear();
+            }
+        }
+    }
+
+    private void recordUserMessageForViews(String msg) {
+        recordUserMessageForViews(msg, isTeamMode());
+    }
+
+    private void recordUserMessageForViews(String msg, boolean allProfiles) {
+        if (msg == null) return;
+        viewAllMessages.add(new ChatMessage("user", msg));
+        if (allProfiles) {
+            for (ChatProfile profile : ChatProfile.values()) {
+                viewMessages.get(profile).add(new ChatMessage("user", msg));
+            }
+        } else {
+            viewMessages.get(ChatProfile.TEAM_LEADER).add(new ChatMessage("user", msg));
+        }
+    }
+
+    private void recordAssistantMessageForViews(ChatProfile profile, String label, String msg) {
+        if (msg == null || msg.isBlank()) return;
+        String resolvedLabel = (label == null || label.isBlank()) ? profile.getDisplayName() : label;
+        viewAllMessages.add(new ChatMessage("assistant", "[" + resolvedLabel + "] " + msg));
+        viewMessages.get(profile).add(new ChatMessage("assistant", msg));
+    }
+
+    private void recordLocalAssistantMessageForViews(String msg, boolean allProfiles) {
+        if (msg == null || msg.isBlank()) return;
+        viewAllMessages.add(new ChatMessage("assistant", "[Local] " + msg));
+        if (allProfiles) {
+            for (ChatProfile profile : ChatProfile.values()) {
+                viewMessages.get(profile).add(new ChatMessage("assistant", msg));
+            }
+        } else {
+            viewMessages.get(ChatProfile.TEAM_LEADER).add(new ChatMessage("assistant", msg));
+        }
+    }
+
+    private void recordLoadedMessageForViews(ChatProfile profile, ChatMessage msg) {
+        if (msg == null) return;
+        String role = msg.getRole() == null ? "" : msg.getRole().toLowerCase();
+        if ("assistant".equals(role)) {
+            recordAssistantMessageForViews(profile, "AI", msg.getContent());
+        } else if ("user".equals(role)) {
+            recordUserMessageForViews(msg.getContent(), false);
+        }
+    }
+
+    private boolean shouldRenderForProfile(ChatProfile profile) {
+        if (viewCombo == null || viewCombo.isDisposed()) {
+            return true;
+        }
+        if (viewCombo.getSelectionIndex() == 0) {
+            return true;
+        }
+        ChatProfile selected = selectedViewProfile();
+        return selected == null || selected == profile;
+    }
+
+    private void renderView() {
+        if (chatArea == null || chatArea.isDisposed()) return;
+        chatArea.setText("");
+        List<ChatMessage> messages = resolveViewMessages();
+        if (messages == null || messages.isEmpty()) {
+            appendSystem("Sin mensajes en este chat");
+            return;
+        }
+        for (ChatMessage msg : messages) {
+            appendMessage(msg.getRole(), msg.getContent());
+        }
+    }
+
+    private List<ChatMessage> resolveViewMessages() {
+        if (viewCombo == null || viewCombo.isDisposed() || viewCombo.getSelectionIndex() == 0) {
+            return viewAllMessages;
+        }
+        ChatProfile selected = selectedViewProfile();
+        if (selected == null) {
+            return viewAllMessages;
+        }
+        return viewMessages.getOrDefault(selected, viewAllMessages);
+    }
+
+    private ChatProfile selectedViewProfile() {
+        if (viewCombo == null || viewCombo.isDisposed()) return null;
+        String text = viewCombo.getText();
+        if ("Team Leader".equalsIgnoreCase(text)) return ChatProfile.TEAM_LEADER;
+        if ("Dev Senior".equalsIgnoreCase(text)) return ChatProfile.DEV_SENIOR;
+        if ("Arquitecto Senior".equalsIgnoreCase(text)) return ChatProfile.ARQ_SENIOR;
+        if ("Auditor Senior".equalsIgnoreCase(text)) return ChatProfile.AUDITOR_SENIOR;
+        return null;
+    }
+
+    private void clearHistories() {
+        String project = workspaceService.getActiveProjectName();
+        if (isTeamMode()) {
+            for (ChatProfile profile : ChatProfile.values()) {
+                ChatSession session = resolveSession(profile, providerCombo.getText(), modelCombo.getText(), project);
+                session.clearHistory();
+                clearConsumedTokens(profile);
+            }
+        } else {
+            ChatSession leader = resolveSession(ChatProfile.TEAM_LEADER, providerCombo.getText(), modelCombo.getText(), project);
+            leader.clearHistory();
+            clearConsumedTokens(ChatProfile.TEAM_LEADER);
+        }
+        resetViewMessages();
+        renderView();
+        refreshTotalTokenCount();
     }
 
     private String ensureTrailingNewline(String code) {
