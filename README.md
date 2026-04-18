@@ -18,6 +18,18 @@ AI Helper Chat es un complemento **gratuito y de código abierto** para Eclipse 
 2. Ejecuta `Run > Eclipse Application` para cargar un runtime workspace con el plugin.
 3. Abre la vista `Window > Show View > Other... > AI Helper Chat`.
 
+## Guía corta (instalación y primer uso)
+Esta guía está pensada para usuarios finales que instalan el plugin desde un update site/Marketplace.
+
+1. En Eclipse, abre `Help > Install New Software...`.
+2. Pulsa `Add...` y usa la URL del update site publicado.
+3. Selecciona `AI Helper`, acepta licencias y reinicia Eclipse cuando lo pida.
+4. Abre la vista con `Window > Show View > Other... > AI Helper Chat`.
+5. Ve a preferencias (`Window > Preferences > AI Helper`) y configura proveedor/modelo/credenciales.
+6. Escribe un prompt corto de prueba y envíalo con `Ctrl+Enter`.
+
+Si no responde, revisa primero: credenciales del proveedor, conectividad de red y modelo configurado.
+
 ## Estructura del workspace PDE
 El repositorio ya incluye los tres proyectos que exige Eclipse Marketplace para distribuir un bundle completo:
 - `com.aihelper`: proyecto plug-in (bundle OSGi) con el código Java y los manifiestos (`plugin.xml`, `MANIFEST.MF`, `build.properties`).
@@ -45,7 +57,7 @@ La carpeta `scripts/` incluye automatizaciones para repetir el flujo local sin c
 - `powershell -ExecutionPolicy Bypass -File .\scripts\Rebuild-Plugin.ps1`
 	- recompila `com.aihelper`, reconstruye los JARs en `release/` y sincroniza `docs/`.
 - `powershell -ExecutionPolicy Bypass -File .\scripts\Verify-PluginArtifacts.ps1`
-	- valida que los JARs publicados contengan `plugin.xml`, `ChatView.class`, `LocalWorkspaceRouter.class` y que `artifacts.jar` mantenga los mappings `${repoUrl}` correctos.
+	- valida que los JARs publicados contengan `plugin.xml`, `ChatView.class`, `LocalWorkspaceRouter.class` y que la metadata p2 (`artifacts.jar` + `content.jar`) exista y sea consistente.
 - `powershell -ExecutionPolicy Bypass -File .\scripts\Search-JarText.ps1 -SearchText max_tokens,gpt-4o-mini`
 	- busca cadenas ASCII dentro de clases compiladas para inspeccionar constantes incluidas en el binario.
 
